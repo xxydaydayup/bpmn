@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+  id="Definitions_RequirementApproval"
+  targetNamespace="https://bpmn-workspace.local/processes"
+  exporter="BPMN Workspace"
+  exporterVersion="0.1.0">
+  <bpmn:process id="Process_RequirementApproval" name="需求提交与确认" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_Start" name="开始">
+      <bpmn:outgoing>Flow_Start_Submit</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_SubmitRequirement" name="提交需求" wf:assignee="requester" wf:formKey="requirement-submit">
+      <bpmn:incoming>Flow_Start_Submit</bpmn:incoming>
+      <bpmn:outgoing>Flow_Submit_Confirm</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_ConfirmRequirement" name="确认需求" wf:assignee="reviewer" wf:formKey="requirement-confirm">
+      <bpmn:incoming>Flow_Submit_Confirm</bpmn:incoming>
+      <bpmn:outgoing>Flow_Confirm_End</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="EndEvent_End" name="结束">
+      <bpmn:incoming>Flow_Confirm_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Start_Submit" sourceRef="StartEvent_Start" targetRef="Task_SubmitRequirement" />
+    <bpmn:sequenceFlow id="Flow_Submit_Confirm" sourceRef="Task_SubmitRequirement" targetRef="Task_ConfirmRequirement" />
+    <bpmn:sequenceFlow id="Flow_Confirm_End" sourceRef="Task_ConfirmRequirement" targetRef="EndEvent_End" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_RequirementApproval">
+    <bpmndi:BPMNPlane id="BPMNPlane_RequirementApproval" bpmnElement="Process_RequirementApproval">
+      <bpmndi:BPMNShape id="StartEvent_Start_di" bpmnElement="StartEvent_Start">
+        <dc:Bounds x="64" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="54" y="176" width="56" height="20" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_SubmitRequirement_di" bpmnElement="Task_SubmitRequirement">
+        <dc:Bounds x="180" y="110" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ConfirmRequirement_di" bpmnElement="Task_ConfirmRequirement">
+        <dc:Bounds x="396" y="110" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_End_di" bpmnElement="EndEvent_End">
+        <dc:Bounds x="636" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="626" y="176" width="56" height="20" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Start_Submit_di" bpmnElement="Flow_Start_Submit">
+        <di:waypoint x="100" y="150" />
+        <di:waypoint x="180" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Submit_Confirm_di" bpmnElement="Flow_Submit_Confirm">
+        <di:waypoint x="300" y="150" />
+        <di:waypoint x="396" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Confirm_End_di" bpmnElement="Flow_Confirm_End">
+        <di:waypoint x="516" y="150" />
+        <di:waypoint x="636" y="150" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

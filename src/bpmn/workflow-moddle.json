@@ -1,0 +1,26 @@
+{
+  "name": "Workflow",
+  "uri": "https://bpmn-workspace.local/schema/workflow",
+  "prefix": "wf",
+  "xml": {
+    "tagAlias": "lowerCase"
+  },
+  "types": [
+    {
+      "name": "UserTaskProperties",
+      "extends": ["bpmn:UserTask"],
+      "properties": [
+        {
+          "name": "assignee",
+          "type": "String",
+          "isAttr": true
+        },
+        {
+          "name": "formKey",
+          "type": "String",
+          "isAttr": true
+        }
+      ]
+    }
+  ]
+}

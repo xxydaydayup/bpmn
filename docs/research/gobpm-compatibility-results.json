@@ -1,0 +1,128 @@
+[
+  {
+    "assignments": {
+      "assignee": [
+        "${manager}"
+      ],
+      "candidateGroups": [
+        "managers"
+      ]
+    },
+    "dropped": [
+      {
+        "Element": "Task_Approve",
+        "Construct": "camunda:properties",
+        "Reason": "carries vendor key/value pairs the model has nowhere to put"
+      }
+    ],
+    "export_has_assignee": false,
+    "export_has_camunda_namespace": false,
+    "export_has_di": false,
+    "export_has_extension_marker": false,
+    "export_success": true,
+    "file": "camunda-alternate-prefix.bpmn",
+    "import_success": true
+  },
+  {
+    "assignments": {
+      "assignee": [
+        "${manager}"
+      ],
+      "candidateGroups": [
+        "managers"
+      ]
+    },
+    "dropped": [
+      {
+        "Element": "Task_Approve",
+        "Construct": "camunda:properties",
+        "Reason": "carries vendor key/value pairs the model has nowhere to put"
+      }
+    ],
+    "export_has_assignee": false,
+    "export_has_camunda_namespace": false,
+    "export_has_di": false,
+    "export_has_extension_marker": false,
+    "export_success": true,
+    "file": "camunda.bpmn",
+    "import_success": true
+  },
+  {
+    "assignments": {
+      "assignee": [
+        "${manager}"
+      ],
+      "candidateGroups": [
+        "managers"
+      ]
+    },
+    "dropped": [
+      {
+        "Element": "Task_Approve",
+        "Construct": "camunda:properties",
+        "Reason": "carries vendor key/value pairs the model has nowhere to put"
+      }
+    ],
+    "export_has_assignee": false,
+    "export_has_camunda_namespace": false,
+    "export_has_di": false,
+    "export_has_extension_marker": false,
+    "export_success": true,
+    "file": "moddle-dynamic.bpmn",
+    "import_success": true
+  },
+  {
+    "dropped": [
+      {
+        "Element": "Task_Approve",
+        "Construct": "camunda:failedJobRetryTimeCycle",
+        "Reason": "carries a recurrence this converter could not read; a value it cannot parse is reported rather than guessed at"
+      }
+    ],
+    "export_has_assignee": false,
+    "export_has_camunda_namespace": false,
+    "export_has_di": false,
+    "export_has_extension_marker": false,
+    "export_success": true,
+    "external_worker": true,
+    "file": "moddle-external-retry.bpmn",
+    "import_success": true,
+    "retry_policy_present": false,
+    "worker_topic": "charge"
+  },
+  {
+    "assignments": {
+      "assignee": [
+        "john"
+      ],
+      "candidateGroups": [
+        "managers"
+      ]
+    },
+    "dropped": [
+      {
+        "Element": "Task_Approve",
+        "Construct": "camunda:properties",
+        "Reason": "carries vendor key/value pairs the model has nowhere to put"
+      }
+    ],
+    "export_has_assignee": false,
+    "export_has_camunda_namespace": false,
+    "export_has_di": false,
+    "export_has_extension_marker": false,
+    "export_success": true,
+    "file": "moddle-static.bpmn",
+    "import_success": true
+  },
+  {
+    "assignments": {},
+    "dropped": null,
+    "export_has_assignee": false,
+    "export_has_camunda_namespace": false,
+    "export_has_di": false,
+    "export_has_extension_marker": false,
+    "export_success": true,
+    "file": "standard.bpmn",
+    "import_success": true
+  }
+]

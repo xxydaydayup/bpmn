@@ -23,13 +23,13 @@ const route = useRoute()
         :collapse-transition="false"
         class="sidebar-menu"
       >
-        <ElMenuItem index="/table">
+        <ElMenuItem index="/table" aria-label="表格示例">
           <ElIcon><Grid /></ElIcon>
-          <template #title>表格示例</template>
+          <template #title><span>表格示例</span></template>
         </ElMenuItem>
-        <ElMenuItem index="/designer">
+        <ElMenuItem index="/designer" aria-label="流程设计">
           <ElIcon><Connection /></ElIcon>
-          <template #title>流程设计</template>
+          <template #title><span>流程设计</span></template>
         </ElMenuItem>
       </ElMenu>
       <div v-if="!app.sidebarCollapsed" class="sidebar-footer">从一个简单的流程开始。</div>

@@ -12,3 +12,5 @@ dist/
 .vscode/
 output/
 .playwright-cli/
+
+.scratch/

@@ -19,11 +19,7 @@ const {
 <template>
   <section>
     <div class="page-heading">
-      <div>
-        <p class="eyebrow">WORKSPACE / TABLE</p>
-        <h1>表格示例</h1>
-        <p class="page-description">搜索、筛选与分页的基础示例，后续可扩展为业务列表。</p>
-      </div>
+      <h1>表格示例</h1>
       <ElTag type="info" effect="plain" round>本地示例数据</ElTag>
     </div>
 
@@ -75,6 +71,5 @@ const {
         />
       </div>
     </div>
-    <p class="page-note">示例数据仅用于展示，不会保存到服务器。</p>
   </section>
 </template>

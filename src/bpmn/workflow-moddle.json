@@ -21,6 +21,22 @@
           "isAttr": true
         }
       ]
+    },
+    {
+      "name": "Approval",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "version", "type": "String", "isAttr": true },
+        { "name": "policy", "type": "String", "isAttr": true },
+        { "name": "participants", "type": "Participant", "isMany": true }
+      ]
+    },
+    {
+      "name": "Participant",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "userId", "type": "String", "isAttr": true }
+      ]
     }
   ]
 }

@@ -9,3 +9,10 @@ export interface NodeProperties {
   formKey: string
   isUserTask: boolean
 }
+
+export interface ValidationIssue {
+  code: string
+  severity: 'error' | 'warning'
+  elementId: string
+  message: string
+}

@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+  id="Definitions_Process_ParallelApproval" targetNamespace="https://bpmn-workspace.local/processes">
+  <bpmn:process id="Process_ParallelApproval" name="并行审批" isExecutable="false">
+    <bpmn:documentation>设计示例：审批结果变量由后续引擎适配提供。通过、不通过、退回分别对应 approved、rejected、returned；重提清空本轮结果并重新审批。wf:approval version=1 规则见 docs/adr/0001-human-approval-design.md。</bpmn:documentation>
+    <bpmn:startEvent id="Start_Parallel" name="开始">
+      <bpmn:outgoing>Flow_ParallelStart</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_ParallelApply" name="提交申请" wf:assignee="requester" wf:formKey="application">
+      <bpmn:incoming>Flow_ParallelStart</bpmn:incoming>
+      <bpmn:incoming>Flow_ParallelReturn</bpmn:incoming>
+      <bpmn:outgoing>Flow_ParallelSubmit</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:parallelGateway id="Gateway_ParallelSplit" name="分叉">
+      <bpmn:incoming>Flow_ParallelSubmit</bpmn:incoming>
+      <bpmn:outgoing>Flow_ParallelFinance</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ParallelLegal</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:userTask id="Task_ParallelFinance" name="财务会签">
+      <bpmn:extensionElements><wf:approval version="1" policy="all">
+        <wf:participant userId="finance_a" />
+        <wf:participant userId="finance_b" />
+      </wf:approval></bpmn:extensionElements>
+      <bpmn:incoming>Flow_ParallelFinance</bpmn:incoming>
+      <bpmn:outgoing>Flow_FinanceCheck</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics isSequential="false"><bpmn:loopCardinality xsi:type="bpmn:tFormalExpression">2</bpmn:loopCardinality></bpmn:multiInstanceLoopCharacteristics>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_FinanceCheck" name="结果" default="Flow_FinanceSkip">
+      <bpmn:incoming>Flow_FinanceCheck</bpmn:incoming>
+      <bpmn:outgoing>Flow_FinanceApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_FinanceSkip</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_FinanceHead" name="财务主管审批" wf:assignee="finance_head">
+      <bpmn:incoming>Flow_FinanceApproved</bpmn:incoming>
+      <bpmn:outgoing>Flow_FinanceHead</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_FinanceMerge" name="合流">
+      <bpmn:incoming>Flow_FinanceSkip</bpmn:incoming>
+      <bpmn:incoming>Flow_FinanceHead</bpmn:incoming>
+      <bpmn:outgoing>Flow_FinanceJoin</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_ParallelLegal" name="法务审批" wf:assignee="legal">
+      <bpmn:incoming>Flow_ParallelLegal</bpmn:incoming>
+      <bpmn:outgoing>Flow_LegalJoin</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:parallelGateway id="Gateway_ParallelJoin" name="汇合">
+      <bpmn:incoming>Flow_FinanceJoin</bpmn:incoming>
+      <bpmn:incoming>Flow_LegalJoin</bpmn:incoming>
+      <bpmn:outgoing>Flow_ParallelResult</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:exclusiveGateway id="Gateway_ParallelResult" name="结果" default="Flow_ParallelReturn">
+      <bpmn:incoming>Flow_ParallelResult</bpmn:incoming>
+      <bpmn:outgoing>Flow_ParallelApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ParallelRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ParallelReturn</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_ParallelApproved" name="通过">
+      <bpmn:incoming>Flow_ParallelApproved</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_ParallelRejected" name="不通过">
+      <bpmn:incoming>Flow_ParallelRejected</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_ParallelStart" sourceRef="Start_Parallel" targetRef="Task_ParallelApply">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelSubmit" sourceRef="Task_ParallelApply" targetRef="Gateway_ParallelSplit">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelFinance" sourceRef="Gateway_ParallelSplit" targetRef="Task_ParallelFinance">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelLegal" sourceRef="Gateway_ParallelSplit" targetRef="Task_ParallelLegal">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_FinanceCheck" sourceRef="Task_ParallelFinance" targetRef="Gateway_FinanceCheck">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_FinanceApproved" sourceRef="Gateway_FinanceCheck" targetRef="Task_FinanceHead" name="通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">financeReviewOutcome == 'approved'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_FinanceSkip" sourceRef="Gateway_FinanceCheck" targetRef="Gateway_FinanceMerge" name="其余结果">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_FinanceHead" sourceRef="Task_FinanceHead" targetRef="Gateway_FinanceMerge">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_FinanceJoin" sourceRef="Gateway_FinanceMerge" targetRef="Gateway_ParallelJoin">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_LegalJoin" sourceRef="Task_ParallelLegal" targetRef="Gateway_ParallelJoin">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelResult" sourceRef="Gateway_ParallelJoin" targetRef="Gateway_ParallelResult">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelApproved" sourceRef="Gateway_ParallelResult" targetRef="End_ParallelApproved" name="全部通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">financeOutcome == 'approved' &amp;&amp; legalOutcome == 'approved'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelRejected" sourceRef="Gateway_ParallelResult" targetRef="End_ParallelRejected" name="不通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">financeOutcome == 'rejected' || legalOutcome == 'rejected'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ParallelReturn" sourceRef="Gateway_ParallelResult" targetRef="Task_ParallelApply" name="退回修改">
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Process_ParallelApproval"><bpmndi:BPMNPlane id="Plane_Process_ParallelApproval" bpmnElement="Process_ParallelApproval">
+    <bpmndi:BPMNShape id="Start_Parallel_di" bpmnElement="Start_Parallel"><dc:Bounds x="50" y="250" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="23" y="294" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ParallelApply_di" bpmnElement="Task_ParallelApply"><dc:Bounds x="130" y="228" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_ParallelSplit_di" bpmnElement="Gateway_ParallelSplit"><dc:Bounds x="290" y="243" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="270" y="301" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ParallelFinance_di" bpmnElement="Task_ParallelFinance"><dc:Bounds x="380" y="98" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_FinanceCheck_di" bpmnElement="Gateway_FinanceCheck" isMarkerVisible="true"><dc:Bounds x="530" y="113" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="510" y="171" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_FinanceHead_di" bpmnElement="Task_FinanceHead"><dc:Bounds x="630" y="98" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_FinanceMerge_di" bpmnElement="Gateway_FinanceMerge" isMarkerVisible="true"><dc:Bounds x="795" y="113" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="775" y="171" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ParallelLegal_di" bpmnElement="Task_ParallelLegal"><dc:Bounds x="540" y="348" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_ParallelJoin_di" bpmnElement="Gateway_ParallelJoin"><dc:Bounds x="910" y="243" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="890" y="301" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_ParallelResult_di" bpmnElement="Gateway_ParallelResult" isMarkerVisible="true"><dc:Bounds x="1020" y="243" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="1000" y="301" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_ParallelApproved_di" bpmnElement="End_ParallelApproved"><dc:Bounds x="1170" y="180" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="1143" y="224" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_ParallelRejected_di" bpmnElement="End_ParallelRejected"><dc:Bounds x="1170" y="360" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="1132" y="404" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNEdge id="Flow_ParallelStart_di" bpmnElement="Flow_ParallelStart">
+      <di:waypoint x="86" y="268" />
+      <di:waypoint x="130" y="268" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelSubmit_di" bpmnElement="Flow_ParallelSubmit">
+      <di:waypoint x="240" y="268" />
+      <di:waypoint x="290" y="268" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelFinance_di" bpmnElement="Flow_ParallelFinance">
+      <di:waypoint x="315" y="243" />
+      <di:waypoint x="315" y="138" />
+      <di:waypoint x="380" y="138" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelLegal_di" bpmnElement="Flow_ParallelLegal">
+      <di:waypoint x="315" y="293" />
+      <di:waypoint x="315" y="388" />
+      <di:waypoint x="540" y="388" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_FinanceCheck_di" bpmnElement="Flow_FinanceCheck">
+      <di:waypoint x="490" y="138" />
+      <di:waypoint x="530" y="138" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_FinanceApproved_di" bpmnElement="Flow_FinanceApproved">
+      <di:waypoint x="580" y="138" />
+      <di:waypoint x="630" y="138" />
+      <bpmndi:BPMNLabel><dc:Bounds x="550" y="55" width="110" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_FinanceSkip_di" bpmnElement="Flow_FinanceSkip">
+      <di:waypoint x="555" y="163" />
+      <di:waypoint x="555" y="215" />
+      <di:waypoint x="820" y="215" />
+      <di:waypoint x="820" y="163" />
+      <bpmndi:BPMNLabel><dc:Bounds x="606" y="225" width="148" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_FinanceHead_di" bpmnElement="Flow_FinanceHead">
+      <di:waypoint x="740" y="138" />
+      <di:waypoint x="795" y="138" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_FinanceJoin_di" bpmnElement="Flow_FinanceJoin">
+      <di:waypoint x="845" y="138" />
+      <di:waypoint x="935" y="138" />
+      <di:waypoint x="935" y="243" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_LegalJoin_di" bpmnElement="Flow_LegalJoin">
+      <di:waypoint x="650" y="388" />
+      <di:waypoint x="935" y="388" />
+      <di:waypoint x="935" y="293" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelResult_di" bpmnElement="Flow_ParallelResult">
+      <di:waypoint x="960" y="268" />
+      <di:waypoint x="1020" y="268" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelApproved_di" bpmnElement="Flow_ParallelApproved">
+      <di:waypoint x="1045" y="243" />
+      <di:waypoint x="1045" y="198" />
+      <di:waypoint x="1170" y="198" />
+      <bpmndi:BPMNLabel><dc:Bounds x="1029" y="135" width="148" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelRejected_di" bpmnElement="Flow_ParallelRejected">
+      <di:waypoint x="1070" y="268" />
+      <di:waypoint x="1188" y="268" />
+      <di:waypoint x="1188" y="360" />
+      <bpmndi:BPMNLabel><dc:Bounds x="1064" y="293" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ParallelReturn_di" bpmnElement="Flow_ParallelReturn">
+      <di:waypoint x="1045" y="293" />
+      <di:waypoint x="1045" y="510" />
+      <di:waypoint x="185" y="510" />
+      <di:waypoint x="185" y="308" />
+      <bpmndi:BPMNLabel><dc:Bounds x="481" y="525" width="148" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+  </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>
+</bpmn:definitions>

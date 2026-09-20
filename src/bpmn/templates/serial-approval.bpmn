@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+  id="Definitions_Process_SerialApproval" targetNamespace="https://bpmn-workspace.local/processes">
+  <bpmn:process id="Process_SerialApproval" name="串行审批" isExecutable="true">
+    <bpmn:startEvent id="Start_Serial" name="开始">
+      <bpmn:outgoing>Flow_Serial_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Apply" name="提交申请" wf:assignee="requester" wf:formKey="application">
+      <bpmn:incoming>Flow_Serial_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Serial_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_Manager" name="主管审批" wf:assignee="manager">
+      <bpmn:incoming>Flow_Serial_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Serial_3</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_Finance" name="财务审批" wf:assignee="finance">
+      <bpmn:incoming>Flow_Serial_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Serial_4</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="End_Serial" name="结束">
+      <bpmn:incoming>Flow_Serial_4</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Serial_1" sourceRef="Start_Serial" targetRef="Task_Apply">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Serial_2" sourceRef="Task_Apply" targetRef="Task_Manager">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Serial_3" sourceRef="Task_Manager" targetRef="Task_Finance">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Serial_4" sourceRef="Task_Finance" targetRef="End_Serial">
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Process_SerialApproval">
+    <bpmndi:BPMNPlane id="Plane_Process_SerialApproval" bpmnElement="Process_SerialApproval">
+      <bpmndi:BPMNShape id="Start_Serial_di" bpmnElement="Start_Serial">
+        <dc:Bounds x="60" y="152" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="40" y="196" width="90" height="20" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Apply_di" bpmnElement="Task_Apply">
+        <dc:Bounds x="160" y="130" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Manager_di" bpmnElement="Task_Manager">
+        <dc:Bounds x="370" y="130" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Finance_di" bpmnElement="Task_Finance">
+        <dc:Bounds x="580" y="130" width="120" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Serial_di" bpmnElement="End_Serial">
+        <dc:Bounds x="780" y="152" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="760" y="196" width="90" height="20" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Serial_1_di" bpmnElement="Flow_Serial_1">
+        <di:waypoint x="96" y="170" />
+        <di:waypoint x="160" y="170" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Serial_2_di" bpmnElement="Flow_Serial_2">
+        <di:waypoint x="280" y="170" />
+        <di:waypoint x="370" y="170" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Serial_3_di" bpmnElement="Flow_Serial_3">
+        <di:waypoint x="490" y="170" />
+        <di:waypoint x="580" y="170" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Serial_4_di" bpmnElement="Flow_Serial_4">
+        <di:waypoint x="700" y="170" />
+        <di:waypoint x="780" y="170" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

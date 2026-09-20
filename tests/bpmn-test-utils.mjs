@@ -1,0 +1,36 @@
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import ts from 'typescript'
+
+// Compile dependency-free TS modules with the existing compiler, including on Node 20.
+export async function load(name) {
+  const source = readFileSync(new URL(`../src/bpmn/${name}.ts`, import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+  return import(`data:text/javascript;base64,${Buffer.from(`${compiled}\n//# sourceURL=${name}.ts`).toString('base64')}`)
+}
+export const { readApproval, approvalPatch } = await load('approval')
+export const { validateWorkflow, isValidBpmnId } = await load('validation')
+const require = createRequire(import.meta.url)
+const bpmnRequire = createRequire(require.resolve('bpmn-js/package.json'))
+export const { BpmnModdle } = await import(pathToFileURL(bpmnRequire.resolve('bpmn-moddle')).href)
+export const descriptor = JSON.parse(readFileSync(new URL('../src/bpmn/workflow-moddle.json', import.meta.url), 'utf8'))
+export const graph = definitions => definitions.rootElements.filter(item => item.$type === 'bpmn:Process').map(process => ({
+  id: process.id,
+  nodes: (process.flowElements ?? []).filter(item => item.$instanceOf('bpmn:FlowNode')).map(item => ({
+    id: item.id, type: item.$type, assignee: item.get('wf:assignee'), defaultFlowId: item.default?.id,
+    approval: item.$type === 'bpmn:UserTask' ? readApproval(item) : undefined,
+    advanced: !!(item.eventDefinitions?.length || item.isForCompensation
+      || (item.loopCharacteristics && item.loopCharacteristics.$type !== 'bpmn:MultiInstanceLoopCharacteristics')),
+  })),
+  flows: (process.flowElements ?? []).filter(item => item.$type === 'bpmn:SequenceFlow').map(item => ({ id: item.id, sourceId: item.sourceRef?.id, targetId: item.targetRef?.id, condition: item.conditionExpression?.body })),
+}))
+export async function template(filename) {
+  const moddle = new BpmnModdle({ wf: descriptor })
+  const xml = readFileSync(new URL(`../src/bpmn/templates/${filename}.bpmn`, import.meta.url), 'utf8')
+  const parsed = await moddle.fromXML(xml)
+  return { moddle, xml, ...parsed }
+}
+export function apply(task, patch) {
+  for (const [key, value] of Object.entries(patch)) task.set(key, value)
+}

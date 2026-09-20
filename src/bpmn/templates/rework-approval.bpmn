@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+  id="Definitions_Process_ReworkApproval" targetNamespace="https://bpmn-workspace.local/processes">
+  <bpmn:process id="Process_ReworkApproval" name="退回重提" isExecutable="false">
+    <bpmn:documentation>设计示例：审批结果变量由后续引擎适配提供。通过、不通过、退回分别对应 approved、rejected、returned；重提清空本轮结果并重新审批。wf:approval version=1 规则见 docs/adr/0001-human-approval-design.md。</bpmn:documentation>
+    <bpmn:startEvent id="Start_Rework" name="开始">
+      <bpmn:outgoing>Flow_ReworkStart</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_ReworkApply" name="填写 / 修改申请" wf:assignee="requester" wf:formKey="application">
+      <bpmn:incoming>Flow_ReworkStart</bpmn:incoming>
+      <bpmn:incoming>Flow_ManagerReturn</bpmn:incoming>
+      <bpmn:incoming>Flow_DirectorReturn</bpmn:incoming>
+      <bpmn:outgoing>Flow_ReworkSubmit</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_ReworkManager" name="主管审批" wf:assignee="manager">
+      <bpmn:incoming>Flow_ReworkSubmit</bpmn:incoming>
+      <bpmn:outgoing>Flow_ManagerResult</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_ManagerResult" name="结果" default="Flow_ManagerReturn">
+      <bpmn:incoming>Flow_ManagerResult</bpmn:incoming>
+      <bpmn:outgoing>Flow_ManagerApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ManagerRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ManagerReturn</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_ReworkDirector" name="总监审批" wf:assignee="director">
+      <bpmn:incoming>Flow_ManagerApproved</bpmn:incoming>
+      <bpmn:outgoing>Flow_DirectorResult</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_DirectorResult" name="结果" default="Flow_DirectorReturn">
+      <bpmn:incoming>Flow_DirectorResult</bpmn:incoming>
+      <bpmn:outgoing>Flow_DirectorApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_DirectorRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_DirectorReturn</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_ReworkApproved" name="通过">
+      <bpmn:incoming>Flow_DirectorApproved</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_ReworkRejected" name="不通过">
+      <bpmn:incoming>Flow_ManagerRejected</bpmn:incoming>
+      <bpmn:incoming>Flow_DirectorRejected</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_ReworkStart" sourceRef="Start_Rework" targetRef="Task_ReworkApply">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ReworkSubmit" sourceRef="Task_ReworkApply" targetRef="Task_ReworkManager">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ManagerResult" sourceRef="Task_ReworkManager" targetRef="Gateway_ManagerResult">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ManagerApproved" sourceRef="Gateway_ManagerResult" targetRef="Task_ReworkDirector" name="通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">managerOutcome == 'approved'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ManagerRejected" sourceRef="Gateway_ManagerResult" targetRef="End_ReworkRejected" name="不通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">managerOutcome == 'rejected'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ManagerReturn" sourceRef="Gateway_ManagerResult" targetRef="Task_ReworkApply" name="退回修改">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_DirectorResult" sourceRef="Task_ReworkDirector" targetRef="Gateway_DirectorResult">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_DirectorApproved" sourceRef="Gateway_DirectorResult" targetRef="End_ReworkApproved" name="通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">directorOutcome == 'approved'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_DirectorRejected" sourceRef="Gateway_DirectorResult" targetRef="End_ReworkRejected" name="不通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">directorOutcome == 'rejected'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_DirectorReturn" sourceRef="Gateway_DirectorResult" targetRef="Task_ReworkApply" name="退回重审">
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Process_ReworkApproval"><bpmndi:BPMNPlane id="Plane_Process_ReworkApproval" bpmnElement="Process_ReworkApproval">
+    <bpmndi:BPMNShape id="Start_Rework_di" bpmnElement="Start_Rework"><dc:Bounds x="45" y="182" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="18" y="226" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ReworkApply_di" bpmnElement="Task_ReworkApply"><dc:Bounds x="135" y="160" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ReworkManager_di" bpmnElement="Task_ReworkManager"><dc:Bounds x="320" y="160" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_ManagerResult_di" bpmnElement="Gateway_ManagerResult" isMarkerVisible="true"><dc:Bounds x="470" y="175" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="450" y="233" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ReworkDirector_di" bpmnElement="Task_ReworkDirector"><dc:Bounds x="590" y="160" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_DirectorResult_di" bpmnElement="Gateway_DirectorResult" isMarkerVisible="true"><dc:Bounds x="745" y="175" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="725" y="233" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_ReworkApproved_di" bpmnElement="End_ReworkApproved"><dc:Bounds x="900" y="182" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="873" y="226" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_ReworkRejected_di" bpmnElement="End_ReworkRejected"><dc:Bounds x="900" y="332" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="862" y="376" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNEdge id="Flow_ReworkStart_di" bpmnElement="Flow_ReworkStart">
+      <di:waypoint x="81" y="200" />
+      <di:waypoint x="135" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ReworkSubmit_di" bpmnElement="Flow_ReworkSubmit">
+      <di:waypoint x="245" y="200" />
+      <di:waypoint x="320" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ManagerResult_di" bpmnElement="Flow_ManagerResult">
+      <di:waypoint x="430" y="200" />
+      <di:waypoint x="470" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ManagerApproved_di" bpmnElement="Flow_ManagerApproved">
+      <di:waypoint x="520" y="200" />
+      <di:waypoint x="590" y="200" />
+      <bpmndi:BPMNLabel><dc:Bounds x="505" y="115" width="110" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ManagerRejected_di" bpmnElement="Flow_ManagerRejected">
+      <di:waypoint x="495" y="175" />
+      <di:waypoint x="495" y="85" />
+      <di:waypoint x="975" y="85" />
+      <di:waypoint x="975" y="350" />
+      <di:waypoint x="936" y="350" />
+      <bpmndi:BPMNLabel><dc:Bounds x="644" y="56" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ManagerReturn_di" bpmnElement="Flow_ManagerReturn">
+      <di:waypoint x="495" y="225" />
+      <di:waypoint x="495" y="330" />
+      <di:waypoint x="190" y="330" />
+      <di:waypoint x="190" y="240" />
+      <bpmndi:BPMNLabel><dc:Bounds x="281" y="337" width="148" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_DirectorResult_di" bpmnElement="Flow_DirectorResult">
+      <di:waypoint x="700" y="200" />
+      <di:waypoint x="745" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_DirectorApproved_di" bpmnElement="Flow_DirectorApproved">
+      <di:waypoint x="795" y="200" />
+      <di:waypoint x="900" y="200" />
+      <bpmndi:BPMNLabel><dc:Bounds x="795" y="160" width="110" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_DirectorRejected_di" bpmnElement="Flow_DirectorRejected">
+      <di:waypoint x="770" y="175" />
+      <di:waypoint x="770" y="125" />
+      <di:waypoint x="850" y="125" />
+      <di:waypoint x="850" y="350" />
+      <di:waypoint x="900" y="350" />
+      <bpmndi:BPMNLabel><dc:Bounds x="797" y="260" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_DirectorReturn_di" bpmnElement="Flow_DirectorReturn">
+      <di:waypoint x="770" y="225" />
+      <di:waypoint x="770" y="455" />
+      <di:waypoint x="160" y="455" />
+      <di:waypoint x="160" y="240" />
+      <bpmndi:BPMNLabel><dc:Bounds x="396" y="470" width="148" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+  </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>
+</bpmn:definitions>

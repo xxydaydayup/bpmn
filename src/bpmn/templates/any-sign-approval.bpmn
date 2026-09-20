@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+  id="Definitions_Process_AnySign" targetNamespace="https://bpmn-workspace.local/processes">
+  <bpmn:process id="Process_AnySign" name="或签审批" isExecutable="false">
+    <bpmn:documentation>设计示例：审批结果变量由后续引擎适配提供。通过、不通过、退回分别对应 approved、rejected、returned；重提清空本轮结果并重新审批。wf:approval version=1 规则见 docs/adr/0001-human-approval-design.md。</bpmn:documentation>
+    <bpmn:startEvent id="Start_Review" name="开始">
+      <bpmn:outgoing>Flow_ReviewStart</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_ReviewApply" name="提交申请" wf:assignee="requester" wf:formKey="application">
+      <bpmn:incoming>Flow_ReviewStart</bpmn:incoming>
+      <bpmn:incoming>Flow_ReviewReturn</bpmn:incoming>
+      <bpmn:outgoing>Flow_ReviewSubmit</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_MultiReview" name="或签审批">
+      <bpmn:extensionElements><wf:approval version="1" policy="any">
+        <wf:participant userId="reviewer_a" />
+        <wf:participant userId="reviewer_b" />
+        <wf:participant userId="reviewer_c" />
+      </wf:approval></bpmn:extensionElements>
+      <bpmn:incoming>Flow_ReviewSubmit</bpmn:incoming>
+      <bpmn:outgoing>Flow_ReviewResult</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics isSequential="false"><bpmn:loopCardinality xsi:type="bpmn:tFormalExpression">3</bpmn:loopCardinality></bpmn:multiInstanceLoopCharacteristics>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="Gateway_ReviewResult" name="结果" default="Flow_ReviewReturn">
+      <bpmn:incoming>Flow_ReviewResult</bpmn:incoming>
+      <bpmn:outgoing>Flow_ReviewApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ReviewRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ReviewReturn</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:endEvent id="End_ReviewApproved" name="通过">
+      <bpmn:incoming>Flow_ReviewApproved</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_ReviewRejected" name="不通过">
+      <bpmn:incoming>Flow_ReviewRejected</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_ReviewStart" sourceRef="Start_Review" targetRef="Task_ReviewApply">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ReviewSubmit" sourceRef="Task_ReviewApply" targetRef="Task_MultiReview">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ReviewResult" sourceRef="Task_MultiReview" targetRef="Gateway_ReviewResult">
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ReviewApproved" sourceRef="Gateway_ReviewResult" targetRef="End_ReviewApproved" name="通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">reviewOutcome == 'approved'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ReviewRejected" sourceRef="Gateway_ReviewResult" targetRef="End_ReviewRejected" name="不通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">reviewOutcome == 'rejected'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ReviewReturn" sourceRef="Gateway_ReviewResult" targetRef="Task_ReviewApply" name="退回修改">
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Process_AnySign"><bpmndi:BPMNPlane id="Plane_Process_AnySign" bpmnElement="Process_AnySign">
+    <bpmndi:BPMNShape id="Start_Review_di" bpmnElement="Start_Review"><dc:Bounds x="50" y="182" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="23" y="226" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_ReviewApply_di" bpmnElement="Task_ReviewApply"><dc:Bounds x="150" y="160" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_MultiReview_di" bpmnElement="Task_MultiReview"><dc:Bounds x="360" y="160" width="110" height="80" />
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Gateway_ReviewResult_di" bpmnElement="Gateway_ReviewResult" isMarkerVisible="true"><dc:Bounds x="580" y="175" width="50" height="50" />
+      <bpmndi:BPMNLabel><dc:Bounds x="560" y="233" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_ReviewApproved_di" bpmnElement="End_ReviewApproved"><dc:Bounds x="790" y="102" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="763" y="146" width="90" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_ReviewRejected_di" bpmnElement="End_ReviewRejected"><dc:Bounds x="790" y="282" width="36" height="36" />
+      <bpmndi:BPMNLabel><dc:Bounds x="752" y="326" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNShape>
+    <bpmndi:BPMNEdge id="Flow_ReviewStart_di" bpmnElement="Flow_ReviewStart">
+      <di:waypoint x="86" y="200" />
+      <di:waypoint x="150" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ReviewSubmit_di" bpmnElement="Flow_ReviewSubmit">
+      <di:waypoint x="260" y="200" />
+      <di:waypoint x="360" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ReviewResult_di" bpmnElement="Flow_ReviewResult">
+      <di:waypoint x="470" y="200" />
+      <di:waypoint x="580" y="200" />
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ReviewApproved_di" bpmnElement="Flow_ReviewApproved">
+      <di:waypoint x="605" y="175" />
+      <di:waypoint x="605" y="120" />
+      <di:waypoint x="790" y="120" />
+      <bpmndi:BPMNLabel><dc:Bounds x="650" y="90" width="110" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ReviewRejected_di" bpmnElement="Flow_ReviewRejected">
+      <di:waypoint x="630" y="200" />
+      <di:waypoint x="808" y="200" />
+      <di:waypoint x="808" y="282" />
+      <bpmndi:BPMNLabel><dc:Bounds x="689" y="205" width="112" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_ReviewReturn_di" bpmnElement="Flow_ReviewReturn">
+      <di:waypoint x="605" y="225" />
+      <di:waypoint x="605" y="400" />
+      <di:waypoint x="205" y="400" />
+      <di:waypoint x="205" y="240" />
+      <bpmndi:BPMNLabel><dc:Bounds x="336" y="415" width="148" height="40" /></bpmndi:BPMNLabel>
+    </bpmndi:BPMNEdge>
+  </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>
+</bpmn:definitions>

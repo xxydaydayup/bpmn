@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+  id="Definitions_PortableApproval"
+  targetNamespace="https://bpmn-workspace.local/research/portability">
+  <bpmn:process id="Process_PortableApproval" name="审批设计示例" isExecutable="false">
+    <bpmn:startEvent id="StartEvent_Start" name="开始">
+      <bpmn:outgoing>Flow_Start_Approve</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Approve" name="经理审批" wf:assignee="manager" wf:formKey="approval-form">
+      <bpmn:incoming>Flow_Start_Approve</bpmn:incoming>
+      <bpmn:outgoing>Flow_Approve_End</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="EndEvent_End" name="结束">
+      <bpmn:incoming>Flow_Approve_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Start_Approve" sourceRef="StartEvent_Start" targetRef="Task_Approve" />
+    <bpmn:sequenceFlow id="Flow_Approve_End" sourceRef="Task_Approve" targetRef="EndEvent_End" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_PortableApproval">
+    <bpmndi:BPMNPlane id="Plane_PortableApproval" bpmnElement="Process_PortableApproval">
+      <bpmndi:BPMNShape id="StartEvent_Start_di" bpmnElement="StartEvent_Start">
+        <dc:Bounds x="80" y="162" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Approve_di" bpmnElement="Task_Approve">
+        <dc:Bounds x="200" y="132" width="220" height="96" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_End_di" bpmnElement="EndEvent_End">
+        <dc:Bounds x="520" y="162" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Start_Approve_di" bpmnElement="Flow_Start_Approve">
+        <di:waypoint x="116" y="180" />
+        <di:waypoint x="200" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Approve_End_di" bpmnElement="Flow_Approve_End">
+        <di:waypoint x="420" y="180" />
+        <di:waypoint x="520" y="180" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

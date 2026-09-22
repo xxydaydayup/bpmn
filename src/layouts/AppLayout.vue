@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElButton, ElIcon, ElMenu, ElMenuItem } from 'element-plus'
-import { Fold, Expand, Grid, Connection } from '@element-plus/icons-vue'
+import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -33,6 +33,14 @@ const collapsed = computed(() => isDesigner.value || app.sidebarCollapsed)
         <ElMenuItem index="/designer" aria-label="流程设计">
           <ElIcon><Connection /></ElIcon>
           <template #title><span>流程设计</span></template>
+        </ElMenuItem>
+        <ElMenuItem index="/camunda" aria-label="Camunda 7 引擎联调">
+          <ElIcon><VideoPlay /></ElIcon>
+          <template #title><span>引擎联调</span></template>
+        </ElMenuItem>
+        <ElMenuItem index="/camunda-validation" aria-label="流程验证">
+          <ElIcon><CircleCheck /></ElIcon>
+          <template #title><span>流程验证</span></template>
         </ElMenuItem>
       </ElMenu>
     </aside>

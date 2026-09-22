@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:wf="https://bpmn-workspace.local/schema/workflow"
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
   id="Definitions_Process_ParallelApproval" targetNamespace="https://bpmn-workspace.local/processes">
-  <bpmn:process id="Process_ParallelApproval" name="并行审批" isExecutable="false">
-    <bpmn:documentation>设计示例：审批结果变量由后续引擎适配提供。通过、不通过、退回分别对应 approved、rejected、returned；重提清空本轮结果并重新审批。wf:approval version=1 规则见 docs/adr/0001-human-approval-design.md。</bpmn:documentation>
+  <bpmn:process id="Process_ParallelApproval" name="并行审批" isExecutable="false" camunda:historyTimeToLive="30">
+    <bpmn:documentation>设计示例：多实例任务使用 Camunda 7 标准 collection 和 elementVariable 配置；审批结果变量与业务结算由运行时负责。</bpmn:documentation>
     <bpmn:startEvent id="Start_Parallel" name="开始">
       <bpmn:outgoing>Flow_ParallelStart</bpmn:outgoing>
     </bpmn:startEvent>
-    <bpmn:userTask id="Task_ParallelApply" name="提交申请" wf:assignee="requester" wf:formKey="application">
+    <bpmn:userTask id="Task_ParallelApply" name="提交申请" camunda:assignee="requester" camunda:formKey="application">
       <bpmn:incoming>Flow_ParallelStart</bpmn:incoming>
       <bpmn:incoming>Flow_ParallelReturn</bpmn:incoming>
       <bpmn:outgoing>Flow_ParallelSubmit</bpmn:outgoing>
@@ -16,21 +16,17 @@
       <bpmn:outgoing>Flow_ParallelFinance</bpmn:outgoing>
       <bpmn:outgoing>Flow_ParallelLegal</bpmn:outgoing>
     </bpmn:parallelGateway>
-    <bpmn:userTask id="Task_ParallelFinance" name="财务会签">
-      <bpmn:extensionElements><wf:approval version="1" policy="all">
-        <wf:participant userId="finance_a" />
-        <wf:participant userId="finance_b" />
-      </wf:approval></bpmn:extensionElements>
+    <bpmn:userTask id="Task_ParallelFinance" name="财务会签" camunda:assignee="${reviewer}">
       <bpmn:incoming>Flow_ParallelFinance</bpmn:incoming>
       <bpmn:outgoing>Flow_FinanceCheck</bpmn:outgoing>
-      <bpmn:multiInstanceLoopCharacteristics isSequential="false"><bpmn:loopCardinality xsi:type="bpmn:tFormalExpression">2</bpmn:loopCardinality></bpmn:multiInstanceLoopCharacteristics>
+      <bpmn:multiInstanceLoopCharacteristics isSequential="false" camunda:collection="${financeReviewers}" camunda:elementVariable="reviewer"><bpmn:loopCardinality xsi:type="bpmn:tFormalExpression">2</bpmn:loopCardinality></bpmn:multiInstanceLoopCharacteristics>
     </bpmn:userTask>
     <bpmn:exclusiveGateway id="Gateway_FinanceCheck" name="结果" default="Flow_FinanceSkip">
       <bpmn:incoming>Flow_FinanceCheck</bpmn:incoming>
       <bpmn:outgoing>Flow_FinanceApproved</bpmn:outgoing>
       <bpmn:outgoing>Flow_FinanceSkip</bpmn:outgoing>
     </bpmn:exclusiveGateway>
-    <bpmn:userTask id="Task_FinanceHead" name="财务主管审批" wf:assignee="finance_head">
+    <bpmn:userTask id="Task_FinanceHead" name="财务主管审批" camunda:assignee="finance_head">
       <bpmn:incoming>Flow_FinanceApproved</bpmn:incoming>
       <bpmn:outgoing>Flow_FinanceHead</bpmn:outgoing>
     </bpmn:userTask>
@@ -39,7 +35,7 @@
       <bpmn:incoming>Flow_FinanceHead</bpmn:incoming>
       <bpmn:outgoing>Flow_FinanceJoin</bpmn:outgoing>
     </bpmn:exclusiveGateway>
-    <bpmn:userTask id="Task_ParallelLegal" name="法务审批" wf:assignee="legal">
+    <bpmn:userTask id="Task_ParallelLegal" name="法务审批" camunda:assignee="legal">
       <bpmn:incoming>Flow_ParallelLegal</bpmn:incoming>
       <bpmn:outgoing>Flow_LegalJoin</bpmn:outgoing>
     </bpmn:userTask>

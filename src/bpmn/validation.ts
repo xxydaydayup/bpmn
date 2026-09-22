@@ -1,13 +1,19 @@
 import type { ValidationIssue } from './types'
-import type { ApprovalSnapshot } from './approval'
 
 export interface WorkflowNode {
   id: string
   type: string
   assignee?: string
+  candidateUsers?: string
+  candidateGroups?: string
   defaultFlowId?: string
+  multiInstance?: { enabled: boolean; mode: 'collection' | 'cardinality'; collection: string; elementVariable: string; cardinality: string }
+  serviceImplementation?: 'none' | 'external' | 'class' | 'delegateExpression' | 'expression'
+  serviceTopic?: string
+  serviceClass?: string
+  serviceDelegateExpression?: string
+  serviceExpression?: string
   advanced?: boolean
-  approval?: ApprovalSnapshot
 }
 
 export interface WorkflowFlow {
@@ -27,7 +33,7 @@ export function isValidBpmnId(id: string): boolean {
   return /^[\p{L}_][\p{L}\p{N}\p{M}_.\-\u00B7]*$/u.test(id)
 }
 
-const supportedTypes = new Set(['bpmn:StartEvent', 'bpmn:EndEvent', 'bpmn:UserTask', 'bpmn:ExclusiveGateway', 'bpmn:ParallelGateway'])
+const supportedTypes = new Set(['bpmn:StartEvent', 'bpmn:EndEvent', 'bpmn:UserTask', 'bpmn:ServiceTask', 'bpmn:ExclusiveGateway', 'bpmn:ParallelGateway'])
 
 /** Structural checks only: condition bodies are opaque until an engine is selected. */
 export function validateWorkflow(processes: WorkflowProcess[]): ValidationIssue[] {
@@ -47,8 +53,21 @@ export function validateWorkflow(processes: WorkflowProcess[]): ValidationIssue[
     }
     for (const node of process.nodes) {
       if (node.type === 'bpmn:UserTask') {
-        if ((!node.approval || node.approval.mode === 'single') && !node.assignee?.trim()) add('missing-assignee', node.id, '人工任务缺少办理人')
-        for (const issue of node.approval?.issues ?? []) add(issue.code, node.id, issue.message, issue.severity)
+        if (![node.assignee, node.candidateUsers, node.candidateGroups].some(value => value?.trim())) {
+          add('missing-assignment', node.id, '人工任务至少需要配置办理人、候选用户或候选组')
+        }
+      }
+      if (node.type === 'bpmn:ServiceTask') {
+        if (!node.serviceImplementation || node.serviceImplementation === 'none') add('missing-service-implementation', node.id, '服务任务缺少 Camunda 执行方式')
+        if (node.serviceImplementation === 'external' && !node.serviceTopic?.trim()) add('missing-external-topic', node.id, 'External Task 缺少 topic')
+        if (node.serviceImplementation === 'class' && !node.serviceClass?.trim()) add('missing-service-class', node.id, 'Java 服务任务缺少 class')
+        if (node.serviceImplementation === 'delegateExpression' && !node.serviceDelegateExpression?.trim()) add('missing-service-delegate', node.id, 'Java 服务任务缺少 delegate expression')
+        if (node.serviceImplementation === 'expression' && !node.serviceExpression?.trim()) add('missing-service-expression', node.id, '服务任务缺少 expression')
+      }
+      if (node.multiInstance?.enabled) {
+        if (node.multiInstance.mode === 'collection' && !node.multiInstance.collection.trim()) add('missing-multi-instance-collection', node.id, '集合多实例缺少 Camunda collection 表达式')
+        if (node.multiInstance.mode === 'collection' && !node.multiInstance.elementVariable.trim()) add('missing-multi-instance-element', node.id, '集合多实例缺少元素变量名')
+        if (node.multiInstance.mode === 'cardinality' && !node.multiInstance.cardinality.trim()) add('missing-multi-instance-cardinality', node.id, '循环次数多实例缺少次数表达式')
       }
     }
     const advancedNodes = process.nodes.filter(node => !supportedTypes.has(node.type) || node.advanced)

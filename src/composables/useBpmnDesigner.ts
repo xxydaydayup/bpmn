@@ -4,7 +4,8 @@ import type { Element, Label, Shape, Connection, ModdleElement } from 'bpmn-js/l
 import type CommandStack from 'diagram-js/lib/command/CommandStack'
 import type ElementFactory from 'bpmn-js/lib/features/modeling/ElementFactory'
 import { is } from 'bpmn-js/lib/util/ModelUtil'
-import workflowDescriptor from '@/bpmn/workflow-moddle.json'
+import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json'
+import camundaPlatformBehaviors from 'camunda-bpmn-js-behaviors/lib/camunda-platform'
 import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
 import { createDiagramThemeOptions } from '@/bpmn/modules'
 import { diagramTheme } from '@/bpmn/theme'
@@ -14,7 +15,9 @@ import LayoutRunner from '@/bpmn/LayoutRunner'
 import LayoutCommand from '@/bpmn/LayoutCommand'
 import type { NodeProperties, NodePropertyField, ValidationIssue } from '@/bpmn/types'
 import { isValidBpmnId, validateWorkflow, type WorkflowProcess } from '@/bpmn/validation'
-import { approvalPatch, readApproval } from '@/bpmn/approval'
+import { multiInstancePatch, readMultiInstance } from '@/bpmn/multiInstance'
+import { readServiceTask, serviceTaskPatch } from '@/bpmn/serviceTask'
+import { ensureHistoryTimeToLive } from '@/bpmn/processDefaults'
 
 interface ElementRegistry {
   get(id: string): Element | undefined
@@ -33,7 +36,8 @@ interface Canvas {
 }
 
 const propertyNames: Partial<Record<NodePropertyField, string>> = {
-  name: 'name', assignee: 'wf:assignee', formKey: 'wf:formKey',
+  name: 'name', assignee: 'camunda:assignee', candidateUsers: 'camunda:candidateUsers',
+  candidateGroups: 'camunda:candidateGroups', formKey: 'camunda:formKey',
 }
 
 export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
@@ -164,6 +168,13 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     return root && is(root, 'bpmn:Process') ? root : undefined
   }
 
+  function applyProcessDefaults() {
+    const definitions = modeler?.getDefinitions()
+    for (const element of definitions?.rootElements ?? []) {
+      if (is(element, 'bpmn:Process')) ensureHistoryTimeToLive(element)
+    }
+  }
+
   function checkWorkflow(): ValidationIssue[] {
     const definitions = modeler?.getDefinitions()
     const processes: WorkflowProcess[] = (definitions?.rootElements ?? [])
@@ -172,8 +183,15 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
         id: process.id ?? '',
         nodes: (process.flowElements ?? []).filter((item: ModdleElement) => is(item, 'bpmn:FlowNode'))
           .map((item: ModdleElement) => ({
-            id: item.id ?? '', type: item.$type, assignee: item.get('wf:assignee'), defaultFlowId: item.default?.id,
-            approval: is(item, 'bpmn:UserTask') ? readApproval(item) : undefined,
+            id: item.id ?? '', type: item.$type, assignee: item.get('camunda:assignee'),
+            candidateUsers: item.get('camunda:candidateUsers'), candidateGroups: item.get('camunda:candidateGroups'),
+            defaultFlowId: item.default?.id,
+            multiInstance: readMultiInstance(item),
+            serviceImplementation: is(item, 'bpmn:ServiceTask') ? readServiceTask(item).implementation : undefined,
+            serviceTopic: is(item, 'bpmn:ServiceTask') ? readServiceTask(item).topic : undefined,
+            serviceClass: is(item, 'bpmn:ServiceTask') ? readServiceTask(item).className : undefined,
+            serviceDelegateExpression: is(item, 'bpmn:ServiceTask') ? readServiceTask(item).delegateExpression : undefined,
+            serviceExpression: is(item, 'bpmn:ServiceTask') ? readServiceTask(item).expression : undefined,
             advanced: !!(item.eventDefinitions?.length || item.isForCompensation
               || (item.loopCharacteristics && item.loopCharacteristics.$type !== 'bpmn:MultiInstanceLoopCharacteristics')),
           })),
@@ -225,10 +243,15 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       id: activeElement.id,
       type: activeElement.type,
       name: readString('name'),
-      assignee: readString('wf:assignee'),
-      formKey: readString('wf:formKey'),
+      assignee: readString('camunda:assignee'),
+      candidateUsers: readString('camunda:candidateUsers'),
+      candidateGroups: readString('camunda:candidateGroups'),
+      formKey: readString('camunda:formKey'),
       isUserTask: is(activeElement, 'bpmn:UserTask'),
-      approval: readApproval(businessObject),
+      supportsMultiInstance: is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:ServiceTask'),
+      multiInstance: readMultiInstance(businessObject),
+      supportsServiceConfiguration: is(activeElement, 'bpmn:ServiceTask'),
+      serviceTask: readServiceTask(businessObject),
       supportsConditions: !!gateway && is(gateway, 'bpmn:ExclusiveGateway'),
       conditionExpression: businessObject.conditionExpression?.body ?? '',
       conditionLanguage: businessObject.conditionExpression?.language ?? '',
@@ -286,6 +309,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       if (disposed) return false
       const result = await modeler.importXML(xml)
       if (disposed) return false
+      applyProcessDefaults()
       activeElement = undefined
       layoutStatus.value = ''
       let layoutWarning = ''
@@ -340,13 +364,17 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     propertyError.value = ''
     const modeling = modeler.get<{ updateProperties(element: Element, properties: Record<string, unknown>): void }>('modeling')
     const bo = activeElement.businessObject
-    if (['approvalMode', 'approvalOrder', 'participants', 'repairApproval'].includes(field)) {
-      if (!is(activeElement, 'bpmn:UserTask')) return
-      try {
-        modeling.updateProperties(activeElement, approvalPatch(modeler.get('moddle'), bo, field, value))
-      } catch (cause) {
-        propertyError.value = cause instanceof Error ? cause.message : '审批配置修改失败'
-      }
+    if (field.startsWith('service')) {
+      if (!is(activeElement, 'bpmn:ServiceTask')) return
+      try { modeling.updateProperties(activeElement, serviceTaskPatch(bo, field, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '服务任务配置修改失败' }
+      syncSelection()
+      return
+    }
+    if (field.startsWith('multiInstance')) {
+      if (!is(activeElement, 'bpmn:UserTask') && !is(activeElement, 'bpmn:ServiceTask')) return
+      try { modeling.updateProperties(activeElement, multiInstancePatch(modeler.get('moddle'), bo, field, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '多实例配置修改失败' }
       syncSelection()
       return
     }
@@ -386,7 +414,6 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       return
     }
     if (field !== 'name' && !is(activeElement, 'bpmn:UserTask')) return
-    if (field === 'assignee' && readApproval(bo).mode !== 'single') return
     const property = propertyNames[field]
     if (!property) return
     const nextValue = value.trim() || undefined
@@ -413,10 +440,12 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
   onMounted(async () => {
     if (!container.value) return
     try {
+      const themeOptions = createDiagramThemeOptions()
       modeler = new Modeler({
         container: container.value,
-        moddleExtensions: { wf: workflowDescriptor },
-        ...createDiagramThemeOptions(),
+        moddleExtensions: { camunda: camundaModdleDescriptor },
+        ...themeOptions,
+        additionalModules: [ camundaPlatformBehaviors, ...themeOptions.additionalModules ],
       })
       modeler.get<CommandStack>('commandStack').registerHandler('diagram.applyLayout', LayoutCommand)
       initialized.value = true

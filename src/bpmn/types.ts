@@ -1,7 +1,10 @@
-import type { ApprovalSnapshot } from './approval'
+import type { MultiInstanceSnapshot } from './multiInstance'
+import type { ServiceTaskSnapshot } from './serviceTask'
 
-export type NodePropertyField = 'id' | 'name' | 'assignee' | 'formKey' | 'conditionExpression' | 'defaultFlow'
-  | 'approvalMode' | 'approvalOrder' | 'participants' | 'repairApproval'
+export type NodePropertyField = 'id' | 'name' | 'assignee' | 'candidateUsers' | 'candidateGroups' | 'formKey'
+  | 'conditionExpression' | 'defaultFlow' | 'multiInstanceEnabled' | 'multiInstanceMode'
+  | 'multiInstanceOrder' | 'multiInstanceCollection' | 'multiInstanceElementVariable' | 'multiInstanceCardinality'
+  | 'serviceImplementation' | 'serviceTopic' | 'serviceClass' | 'serviceDelegateExpression' | 'serviceExpression' | 'serviceResultVariable'
 
 /** Plain snapshots keep Vue reactivity away from bpmn-js model objects. */
 export interface NodeProperties {
@@ -10,9 +13,14 @@ export interface NodeProperties {
   type: string
   name: string
   assignee: string
+  candidateUsers: string
+  candidateGroups: string
   formKey: string
   isUserTask: boolean
-  approval: ApprovalSnapshot
+  supportsMultiInstance: boolean
+  multiInstance: MultiInstanceSnapshot
+  supportsServiceConfiguration: boolean
+  serviceTask: ServiceTaskSnapshot
   supportsConditions: boolean
   conditionExpression: string
   conditionLanguage: string

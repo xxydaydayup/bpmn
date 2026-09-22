@@ -5,7 +5,7 @@ import { validateWorkflow, isValidBpmnId, BpmnModdle, descriptor, graph } from '
 
 for (const filename of ['serial-approval', 'amount-approval', 'parallel-approval', 'countersign-approval', 'any-sign-approval', 'rework-approval']) {
   test(`${filename}: real moddle import/export preserves valid template, attributes and DI`, async () => {
-    const moddle = new BpmnModdle({ wf: descriptor })
+    const moddle = new BpmnModdle({ camunda: descriptor })
     const original = readFileSync(new URL(`../src/bpmn/templates/${filename}.bpmn`, import.meta.url), 'utf8')
     const parsed = await moddle.fromXML(original)
     assert.equal(parsed.warnings.length, 0)
@@ -15,9 +15,9 @@ for (const filename of ['serial-approval', 'amount-approval', 'parallel-approval
     assert.equal(reloaded.warnings.length, 0)
     assert.deepEqual(graph(reloaded.rootElement), graph(parsed.rootElement))
     assert.match(saved.xml, /bpmndi:BPMNDiagram/)
-    assert.match(saved.xml, /wf:assignee=/)
+    assert.match(saved.xml, /camunda:assignee=/)
     if (filename === 'amount-approval') {
-      assert.equal(graph(reloaded.rootElement)[0].flows.find(flow => flow.id === 'Flow_High').condition, 'amount > 5000')
+      assert.equal(graph(reloaded.rootElement)[0].flows.find(flow => flow.id === 'Flow_High').condition, '${amount > 5000}')
       assert.equal(graph(reloaded.rootElement)[0].nodes.find(node => node.id === 'Gateway_Amount').defaultFlowId, 'Flow_Standard')
     }
   })
@@ -28,11 +28,21 @@ const baseProcess = () => ({ id: 'Process_Test', nodes: [
 ], flows: [{ id: 'f1', sourceId: 'Start', targetId: 'Task' }, { id: 'f2', sourceId: 'Task', targetId: 'End' }] })
 const codes = process => validateWorkflow([process]).map(issue => issue.code)
 
-test('assignee is required but a form reference is optional', () => {
+test('an assignment is required but a form reference is optional', () => {
   const process = baseProcess()
   assert.deepEqual(codes(process), [])
   process.nodes[1].assignee = '  '
-  assert.deepEqual(codes(process), ['missing-assignee'])
+  assert.deepEqual(codes(process), ['missing-assignment'])
+})
+
+test('candidate users and groups are valid Camunda assignments', () => {
+  const process = baseProcess()
+  delete process.nodes[1].assignee
+  process.nodes[1].candidateUsers = 'alice,bob'
+  assert.deepEqual(codes(process), [])
+  delete process.nodes[1].candidateUsers
+  process.nodes[1].candidateGroups = 'approvers'
+  assert.deepEqual(codes(process), [])
 })
 
 test('disconnected nodes and dangling references are reported', () => {

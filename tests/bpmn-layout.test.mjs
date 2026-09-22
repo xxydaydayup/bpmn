@@ -39,9 +39,9 @@ const samples = ['serial-approval', 'amount-approval', 'parallel-approval', 'cou
 for (const name of [...samples, 'default', 'service']) {
   test(`${name}: layout routes real XML, preserves semantics and reverses in one command`, async () => {
     const parsed = samples.includes(name) ? await template(name) : await (async () => {
-      const moddle = new BpmnModdle({ wf: descriptor })
+      const moddle = new BpmnModdle({ camunda: descriptor })
       let xml = readFileSync(new URL('../src/bpmn/requirement-process.bpmn', import.meta.url), 'utf8')
-      if (name === 'service') xml = xml.replaceAll('bpmn:userTask', 'bpmn:serviceTask').replace(/ wf:(?:assignee|formKey)="[^"]*"/g, '')
+      if (name === 'service') xml = xml.replaceAll('bpmn:userTask', 'bpmn:serviceTask').replace(/ camunda:(?:assignee|formKey)="[^"]*"/g, '')
       return { moddle, ...await moddle.fromXML(xml) }
     })()
     const { moddle, rootElement: definitions } = parsed

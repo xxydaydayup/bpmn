@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ElAlert, ElButton, ElForm, ElFormItem, ElInput, ElOption, ElSelect, ElSwitch } from 'element-plus'
+import { ElAlert, ElForm, ElFormItem, ElInput, ElOption, ElSelect, ElSwitch } from 'element-plus'
 import DiagramIcon from './DiagramIcon.vue'
 import { presentNode } from '@/bpmn/icons'
 import type { NodeProperties, NodePropertyField } from '@/bpmn/types'
@@ -10,22 +10,18 @@ const emit = defineEmits<{ update: [field: NodePropertyField, value: string]; cl
 const activeTab = ref('basic')
 watch(() => props.node?.id, () => { activeTab.value = 'basic' })
 const presentation = computed(() => presentNode(props.node?.type))
-const draft = reactive({ id: '', name: '', assignee: '', formKey: '', conditionExpression: '', defaultFlowId: '', approvalMode: 'single', approvalOrder: 'parallel', participants: '' })
-const canRepairApproval = computed(() => props.node && !props.node.approval.readOnlyReason
-  && ['all', 'any'].includes(props.node.approval.mode)
-  && props.node.approval.issues.some(issue => ['approval-loop-conflict', 'approval-assignee-conflict', 'approval-count-conflict'].includes(issue.code)))
+const draft = reactive({ id: '', name: '', assignee: '', candidateUsers: '', candidateGroups: '', formKey: '', conditionExpression: '', defaultFlowId: '' })
 const nodeType = computed(() => presentation.value.label)
 
 watch(() => props.node, (node) => {
   draft.id = node?.id ?? ''
   draft.name = node?.name ?? ''
   draft.assignee = node?.assignee ?? ''
+  draft.candidateUsers = node?.candidateUsers ?? ''
+  draft.candidateGroups = node?.candidateGroups ?? ''
   draft.formKey = node?.formKey ?? ''
   draft.conditionExpression = node?.conditionExpression ?? ''
   draft.defaultFlowId = node?.defaultFlowId ?? ''
-  draft.approvalMode = node?.approval.mode ?? 'single'
-  draft.approvalOrder = node?.approval.sequential ? 'sequential' : 'parallel'
-  draft.participants = node?.approval.participants.join('\n') ?? ''
 }, { immediate: true })
 </script>
 
@@ -62,40 +58,84 @@ watch(() => props.node, (node) => {
         </ElFormItem>
         <ElFormItem v-if="node.kind === 'node'" label="节点类型"><div class="node-type-readonly"><DiagramIcon :name="presentation.icon" />{{ nodeType }}</div></ElFormItem>
         <template v-if="node.isUserTask">
-          <h3 class="property-section-title section-divider">审批配置</h3>
-          <ElFormItem label="审批方式" for="approval-mode">
-            <ElSelect id="approval-mode" v-model="draft.approvalMode" :disabled="!!node.approval.readOnlyReason" @change="value => emit('update', 'approvalMode', String(value))">
-              <ElOption label="单人办理" value="single" />
-              <ElOption label="会签 · 全员同意" value="all" />
-              <ElOption label="或签 · 任一同意" value="any" />
-              <ElOption v-if="node.approval.mode === 'unconfigured'" label="多实例待配置" value="unconfigured" disabled />
-            </ElSelect>
+          <h3 class="property-section-title section-divider">Camunda 任务分配</h3>
+          <ElFormItem label="办理人" for="node-assignee">
+            <ElInput id="node-assignee" v-model="draft.assignee" placeholder="用户标识或 UEL 表达式" clearable @change="emit('update', 'assignee', draft.assignee)" />
           </ElFormItem>
-          <ElAlert v-if="node.approval.readOnlyReason" class="property-error" :title="node.approval.readOnlyReason" type="warning" :closable="false" />
-          <template v-if="node.approval.mode !== 'single'">
-            <ElFormItem label="办理顺序" for="approval-order">
-              <ElSelect id="approval-order" v-model="draft.approvalOrder" :disabled="!!node.approval.readOnlyReason || node.approval.mode === 'unconfigured'" @change="value => emit('update', 'approvalOrder', String(value))">
-                <ElOption label="并行办理" value="parallel" />
-                <ElOption label="按名单顺序办理" value="sequential" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem label="参与人名单" for="approval-participants" required>
-              <ElInput id="approval-participants" v-model="draft.participants" type="textarea" :rows="4" :readonly="!!node.approval.readOnlyReason || node.approval.mode === 'unconfigured'" placeholder="每行一个用户标识，也可用逗号分隔" @change="emit('update', 'participants', draft.participants)" />
-            </ElFormItem>
-            <p v-if="node.approval.mode === 'all'" class="property-help">全员同意才通过，任一拒绝即不通过。</p>
-            <p v-if="node.approval.mode === 'any'" class="property-help">任一同意即通过，全员拒绝才不通过。</p>
-            <p class="property-help">结果未确定时，任一退回使本环节退回；结果确定后结束本环节剩余待办。规则仅保存，暂不执行。</p>
-          </template>
-          <ElAlert v-if="node.approval.issues.length && !node.approval.readOnlyReason" class="property-error" :title="node.approval.issues.map(issue => issue.message).join('；')" type="warning" :closable="false" />
-          <ElButton v-if="canRepairApproval" size="small" @click="emit('update', 'repairApproval', '')">同步多人配置</ElButton>
-          <p v-if="node.approval.mode !== 'single'" class="property-help">多人改为单人时，仅一人的名单会自动带入办理人；否则需重新填写。</p>
+          <ElFormItem label="候选用户" for="node-candidate-users">
+            <ElInput id="node-candidate-users" v-model="draft.candidateUsers" placeholder="多个用户用逗号分隔，可使用 UEL" clearable @change="emit('update', 'candidateUsers', draft.candidateUsers)" />
+          </ElFormItem>
+          <ElFormItem label="候选组" for="node-candidate-groups">
+            <ElInput id="node-candidate-groups" v-model="draft.candidateGroups" placeholder="多个组用逗号分隔，可使用 UEL" clearable @change="emit('update', 'candidateGroups', draft.candidateGroups)" />
+          </ElFormItem>
+          <p class="property-help">前端只保存静态值或 UEL 原文，不执行表达式。办理人、候选用户和候选组的授权与解析由 Camunda 运行时负责。</p>
         </template>
-        <ElFormItem v-if="node.isUserTask && node.approval.mode === 'single'" label="办理人" for="node-assignee" required>
-          <ElInput id="node-assignee" v-model="draft.assignee" :disabled="!node.isUserTask" placeholder="用户标识" clearable @change="emit('update', 'assignee', draft.assignee)" />
-        </ElFormItem>
         <ElFormItem v-if="node.isUserTask" label="表单" for="node-form">
           <ElInput id="node-form" v-model="draft.formKey" :disabled="!node.isUserTask" placeholder="表单标识" clearable @change="emit('update', 'formKey', draft.formKey)" />
         </ElFormItem>
+        <template v-if="node.supportsMultiInstance">
+          <h3 class="property-section-title section-divider">Camunda 多实例</h3>
+          <ElFormItem label="多实例"><ElSwitch :model-value="node.multiInstance.enabled" :disabled="!!node.multiInstance.readOnlyReason" @change="value => emit('update', 'multiInstanceEnabled', value ? 'true' : 'false')" /></ElFormItem>
+          <ElAlert v-if="node.multiInstance.readOnlyReason" class="property-error" :title="node.multiInstance.readOnlyReason" type="warning" :closable="false" />
+          <template v-if="node.multiInstance.enabled">
+            <ElFormItem label="实例来源" for="multi-instance-mode">
+              <ElSelect id="multi-instance-mode" :model-value="node.multiInstance.mode" :disabled="!!node.multiInstance.readOnlyReason" @change="value => emit('update', 'multiInstanceMode', String(value))">
+                <ElOption label="Camunda 集合" value="collection" />
+                <ElOption label="循环次数" value="cardinality" />
+              </ElSelect>
+            </ElFormItem>
+            <ElFormItem label="办理顺序" for="multi-instance-order">
+              <ElSelect id="multi-instance-order" :model-value="node.multiInstance.sequential ? 'sequential' : 'parallel'" :disabled="!!node.multiInstance.readOnlyReason" @change="value => emit('update', 'multiInstanceOrder', String(value))">
+                <ElOption label="并行办理" value="parallel" />
+                <ElOption label="顺序办理" value="sequential" />
+              </ElSelect>
+            </ElFormItem>
+            <template v-if="node.multiInstance.mode === 'collection'">
+              <ElFormItem label="集合表达式" for="multi-instance-collection">
+                <ElInput id="multi-instance-collection" :model-value="node.multiInstance.collection" :disabled="!!node.multiInstance.readOnlyReason" placeholder="例如：${reviewers}" @change="value => emit('update', 'multiInstanceCollection', String(value))" />
+              </ElFormItem>
+              <ElFormItem label="元素变量" for="multi-instance-variable">
+                <ElInput id="multi-instance-variable" :model-value="node.multiInstance.elementVariable" :disabled="!!node.multiInstance.readOnlyReason" placeholder="例如：reviewer" @change="value => emit('update', 'multiInstanceElementVariable', String(value))" />
+              </ElFormItem>
+              <p class="property-help">通常将办理人配置为 `${reviewer}`，每个集合元素创建一个实例。集合和表达式由 Camunda 运行时解析。</p>
+            </template>
+            <ElFormItem v-else label="循环次数表达式" for="multi-instance-cardinality">
+              <ElInput id="multi-instance-cardinality" :model-value="node.multiInstance.cardinality" :disabled="!!node.multiInstance.readOnlyReason" placeholder="固定数量或 UEL 表达式" @change="value => emit('update', 'multiInstanceCardinality', String(value))" />
+            </ElFormItem>
+          </template>
+        </template>
+        <template v-if="node.supportsServiceConfiguration">
+          <h3 class="property-section-title section-divider">Camunda 服务任务</h3>
+          <ElAlert v-if="node.serviceTask.readOnlyReason" class="property-error" :title="node.serviceTask.readOnlyReason" type="warning" :closable="false" />
+          <ElFormItem label="执行方式" for="service-implementation">
+            <ElSelect id="service-implementation" :model-value="node.serviceTask.implementation" :disabled="!!node.serviceTask.readOnlyReason" @change="value => emit('update', 'serviceImplementation', String(value))">
+              <ElOption label="未配置" value="none" />
+              <ElOption label="External Task" value="external" />
+              <ElOption label="Java class" value="class" />
+              <ElOption label="Delegate expression" value="delegateExpression" />
+              <ElOption label="Expression" value="expression" />
+            </ElSelect>
+          </ElFormItem>
+          <ElFormItem v-if="node.serviceTask.implementation === 'external'" label="Topic" for="service-topic" required>
+            <ElInput id="service-topic" :model-value="node.serviceTask.topic" :disabled="!!node.serviceTask.readOnlyReason" placeholder="Go worker 订阅的 topic" @change="value => emit('update', 'serviceTopic', String(value))" />
+          </ElFormItem>
+          <ElFormItem v-else-if="node.serviceTask.implementation === 'class'" label="Java class" for="service-class" required>
+            <ElInput id="service-class" :model-value="node.serviceTask.className" :disabled="!!node.serviceTask.readOnlyReason" placeholder="完整类名" @change="value => emit('update', 'serviceClass', String(value))" />
+          </ElFormItem>
+          <ElFormItem v-else-if="node.serviceTask.implementation === 'delegateExpression'" label="Delegate expression" for="service-delegate" required>
+            <ElInput id="service-delegate" :model-value="node.serviceTask.delegateExpression" :disabled="!!node.serviceTask.readOnlyReason" placeholder="${serviceDelegate}" @change="value => emit('update', 'serviceDelegateExpression', String(value))" />
+          </ElFormItem>
+          <template v-else-if="node.serviceTask.implementation === 'expression'">
+            <ElFormItem label="Expression" for="service-expression" required>
+              <ElInput id="service-expression" :model-value="node.serviceTask.expression" :disabled="!!node.serviceTask.readOnlyReason" placeholder="${service.execute(execution)}" @change="value => emit('update', 'serviceExpression', String(value))" />
+            </ElFormItem>
+            <ElFormItem label="结果变量" for="service-result-variable">
+              <ElInput id="service-result-variable" :model-value="node.serviceTask.resultVariable" :disabled="!!node.serviceTask.readOnlyReason" clearable @change="value => emit('update', 'serviceResultVariable', String(value))" />
+            </ElFormItem>
+          </template>
+          <p v-if="node.serviceTask.implementation === 'external'" class="property-help">Go worker 通过 Camunda External Task REST 按 topic 获取任务；浏览器此阶段不充当 worker。</p>
+          <p v-else-if="node.serviceTask.implementation !== 'none'" class="property-help">前端只保存配置原文。Java class、Delegate expression 和 Expression 是否可执行取决于 Camunda 引擎部署环境。</p>
+        </template>
         <template v-if="node.kind === 'flow'">
           <ElFormItem v-if="node.supportsConditions" label="默认分支" for="flow-default">
             <ElSwitch id="flow-default" :model-value="node.isDefault" @change="value => emit('update', 'defaultFlow', value ? (node?.id ?? '') : '')" />

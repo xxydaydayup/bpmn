@@ -39,8 +39,8 @@
 .designer-page .tone-service { color: var(--diagram-service); background: var(--diagram-service-soft); }
 .designer-page .tone-branch { color: var(--diagram-branch); background: var(--diagram-branch-soft); }
 .designer-page .tone-parallel { color: var(--diagram-parallel); background: var(--diagram-parallel-soft); }
-.designer-page .tone-start, .designer-page .tone-end { border-radius: 50%; border: 1px solid #b7cbbf; }
-.designer-page .tone-end { background: white; border-width: 2px; }
+.designer-page .tone-start, .designer-page .tone-end { border-radius: 50%; border: 1px solid var(--diagram-event-border); }
+.designer-page .tone-end { background: white; border-width: 2px; color: var(--diagram-end-icon); }
 .designer-page .tone-start .diagram-icon { width: 14px; height: 14px; }
 .designer-page .tone-end .diagram-icon { width: 10px; height: 10px; }
 .designer-page .diagram-area { display: flex; min-height: 0; min-width: 0; flex-direction: column; background: white; }

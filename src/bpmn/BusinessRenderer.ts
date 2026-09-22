@@ -18,6 +18,23 @@ function append<K extends keyof SVGElementTagNameMap>(parent: SVGElement, tag: K
   return element
 }
 
+function appendEventGlyph(parent: SVGElement, element: Shape, name: 'start' | 'end', color: string) {
+  const glyph = new DOMParser().parseFromString(diagramIcons[name], 'image/svg+xml').documentElement
+  // Match the 14px / 10px glyphs inside the library's 28px event symbols.
+  const size = Math.min(element.width, element.height) / 28 * (name === 'start' ? 14 : 10)
+  Object.entries({
+    x: (element.width - size) / 2,
+    y: (element.height - size) / 2,
+    width: size,
+    height: size,
+    color,
+    'stroke-width': 1.65,
+    'pointer-events': 'none',
+  }).forEach(([key, value]) => glyph.setAttribute(key, String(value)))
+  glyph.classList.add('business-event-glyph')
+  parent.appendChild(document.importNode(glyph, true))
+}
+
 export default class BusinessRenderer extends BaseRenderer {
   static $inject = ['eventBus', 'bpmnRenderer']
   private measure = document.createElement('canvas').getContext('2d')
@@ -35,7 +52,16 @@ export default class BusinessRenderer extends BaseRenderer {
       const stroke = event ? (element.type === 'bpmn:StartEvent' ? theme.colors.human : theme.colors.end) : parallel ? theme.colors.parallel : theme.colors.branch
       if (!cards.has(element.type)) {
         shape.style.fill = getFillColor(element, fill)
-        shape.style.stroke = getStrokeColor(element, stroke)
+        const strokeColor = getStrokeColor(element, stroke)
+        shape.style.stroke = strokeColor
+        // Keep native markers for typed events (timer, signal, terminate, etc.).
+        if (event && !element.businessObject.eventDefinitions?.length) {
+          const start = element.type === 'bpmn:StartEvent'
+          shape.style.stroke = getStrokeColor(element, theme.colors.eventBorder)
+          shape.style.strokeWidth = String(Math.min(element.width, element.height) / 28 * (start ? 1 : 2))
+          shape.style.fillOpacity = '1'
+          appendEventGlyph(parent, element, start ? 'start' : 'end', getStrokeColor(element, start ? theme.colors.human : theme.colors.endIcon))
+        }
       }
       return shape
     }

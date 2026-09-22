@@ -11,7 +11,7 @@ export const diagramTheme = {
     fontSize: 14,
   },
   card: { width: 184, height: 88, radius: 9, stroke: '#d5e0d9', strokeWidth: 1.25, iconSize: 20, iconBox: 34, padding: 14, textGap: 12, typeSize: 11, lineHeight: 18 },
-  colors: { human: '#24745e', humanSoft: '#edf5f1', service: '#526d9e', serviceSoft: '#edf2fa', branch: '#a67a36', branchSoft: '#faf4e8', parallel: '#7d6d9b', parallelSoft: '#f2eef8', secondary: '#687870', end: '#84978b' },
+  colors: { human: '#24745e', humanSoft: '#edf5f1', service: '#526d9e', serviceSoft: '#edf2fa', branch: '#a67a36', branchSoft: '#faf4e8', parallel: '#7d6d9b', parallelSoft: '#f2eef8', secondary: '#687870', end: '#84978b', eventBorder: '#b7cbbf', endIcon: '#788c7e' },
   layout: { nodeGap: 64, layerGap: 76, edgeGap: 24, padding: 40 },
 }
 
@@ -23,6 +23,8 @@ export function diagramCSSVariables() {
     '--diagram-accent-soft': diagramTheme.colors.humanSoft,
     '--diagram-human': diagramTheme.colors.human,
     '--diagram-human-soft': diagramTheme.colors.humanSoft,
+    '--diagram-event-border': diagramTheme.colors.eventBorder,
+    '--diagram-end-icon': diagramTheme.colors.endIcon,
     '--diagram-service': diagramTheme.colors.service,
     '--diagram-service-soft': diagramTheme.colors.serviceSoft,
     '--diagram-branch': diagramTheme.colors.branch,

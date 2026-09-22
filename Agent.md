@@ -4,7 +4,7 @@
 
 ## 项目边界
 
-这是已搭建的 Vue + TypeScript + bpmn-js 前端 PoC，围绕现有设计器逐步验证能力。当前支持本地绘图、节点属性编辑、撤销重做和 BPMN XML 导入导出；表格数据为本地示例。流程执行、服务端持久化、登录权限和表单运行时尚未接入，页面修改也未自动保存。
+这是 Vue + TypeScript + bpmn-js 前端 PoC。设计器支持本地绘图、Camunda 7 属性编辑、撤销重做和 BPMN XML 导入导出；另有通过开发代理联调 Camunda 原生 REST 的部署、流程定义、实例和人工任务页面。表格数据仍为本地示例；Go 包装层、服务端设计稿持久化、登录权限和表单运行时尚未接入，页面修改也未自动保存。
 
 区分三个层面的能力：前端可以编辑、XML 可以保存、后端可以执行。每次新增流程能力，都说明本次完成到哪一层；调研建议不能当作已实现功能。
 
@@ -16,8 +16,8 @@
 | --- | --- |
 | 启动项目、确认现有功能、接入环境 | [README.md](./README.md)；代理配置再读 [vite.config.ts](./vite.config.ts) 和 [.env.example](./.env.example) |
 | 画布生命周期、选择同步、历史记录、XML 操作 | [useBpmnDesigner.ts](./src/composables/useBpmnDesigner.ts)；页面交互读 [DesignerView.vue](./src/views/DesignerView.vue) |
-| 新增或调整节点属性 | [workflow-moddle.json](./src/bpmn/workflow-moddle.json)、[types.ts](./src/bpmn/types.ts)、[NodePropertiesPanel.vue](./src/components/designer/NodePropertiesPanel.vue)，以及上面的设计器 composable |
-| 修改多人审批、模式切换或审批执行适配 | [审批设计契约](./docs/adr/0001-human-approval-design.md)、[approval.ts](./src/bpmn/approval.ts)、[审批测试](./tests/bpmn-approval.test.mjs)；区分个人意见、环节结果和并行分支结果 |
+| 新增或调整节点属性 | [Camunda 7 moddle](./node_modules/camunda-bpmn-moddle/resources/camunda.json)、[types.ts](./src/bpmn/types.ts)、[NodePropertiesPanel.vue](./src/components/designer/NodePropertiesPanel.vue)，以及上面的设计器 composable |
+| 修改 Camunda 7 XML 契约或引擎联调 | [ADR-0002](./docs/adr/0002-camunda7-integration.md)、[gateway.ts](./src/api/camunda/gateway.ts)、[CamundaRuntimeView.vue](./src/views/CamundaRuntimeView.vue)、[Camunda XML 测试](./tests/bpmn-approval.test.mjs) |
 | 调整画布样式、字体或标签 | [theme.ts](./src/bpmn/theme.ts)、[LabelTextRenderer.ts](./src/bpmn/LabelTextRenderer.ts)；应用级样式读 [main.css](./src/styles/main.css) |
 | 修改默认流程或准备 XML 验证样本 | [requirement-process.bpmn](./src/bpmn/requirement-process.bpmn) |
 | 修改流程模板或检查、导出规则 | [templates.ts](./src/bpmn/templates.ts)、[validation.ts](./src/bpmn/validation.ts)、[检查测试](./tests/bpmn-validation.test.mjs)；交互入口见设计器页面 |
@@ -28,12 +28,12 @@
 
 - **模型隔离**：bpmn-js 实例、元素和 businessObject 留在设计器 composable 内，由其负责创建与销毁。Vue 面板接收普通数据快照，通过事件提交修改，保持第三方模型不受深层响应式代理影响。
 - **命令栈**：节点属性经 `modeling.updateProperties` 修改，保留撤销、重做和选择同步。新增属性需联动核查 moddle 描述、快照类型、属性映射、面板与 XML 样本，完成一次导出再导入验证。
-- **属性语义**：`name`、流程 `id`、连线 `conditionExpression` 与网关 `default` 使用标准 BPMN；条件只保存原文，执行语义待引擎确定。单人 `wf:assignee` 保持静态用户标识含义，多人名单与策略遵循版本化的审批设计契约；`wf:formKey` 是可空的表单引用。新增动态分配或实际表单加载时，单独实现其语义与验证。
+- **属性语义**：`name`、流程 `id`、连线 `conditionExpression` 与网关 `default` 使用标准 BPMN；条件只保存原文，不由前端求值。办理人、候选用户、候选组和表单引用使用 Camunda 7 标准扩展；UEL/JUEL 表达式只保存原文，交由引擎解释。多人执行只使用 Camunda 7 标准多实例字段，不恢复 `wf:` 审批名单或结果语义。
 - **检查边界**：基础检查错误仅阻止文件下载，保留 XML 编辑、复制与导入修复。检查规则和范围由 [README](./README.md#流程检查与导出) 与验证模块维护；修改规则时运行 `pnpm test`，避免将不支持的执行语义误判为结构错误。
 - **XML 契约**：命名空间 URI 以 moddle 描述为准，后端按 URI 识别扩展。调整已有 URI、字段名或字段含义时，明确旧 XML 的兼容或迁移方式。
 - **失败恢复**：保留导入期间的操作互斥、组件卸载后的异步保护，以及导入失败时恢复原流程的路径。解析阶段尚未替换模型的失败应保留撤销历史；重新导入备份 XML 的恢复路径不能承诺保留原历史。
 - **展示与数据**：主题默认值由主题配置与 renderer 控制，保留导入 XML 的显式样式语义。修改标签渲染时验证中文标签重绘后不意外换行；修改适应画布逻辑时验证工具栏不遮挡开始节点。
-- **后端存储**：接入保存和部署时，将设计 XML 原文按版本保存，另行转换为执行模型；编辑和下载使用设计原文，以保留布局及扩展。自有 `wf` 字段需要显式后端适配。
+- **后端存储**：接入 Go 保存和部署时，将流程设计稿原文按版本保存；不要通过引擎重新导出替换原设计稿，以免丢失布局或扩展。当前 Camunda 直连仅为开发联调入口，生产浏览器不得持有引擎管理员凭据。
 
 ## 接口与列表约定
 
@@ -55,7 +55,7 @@
 
 - **代码或构建配置**：运行 `pnpm build`，它已包含类型检查；仅快速检查类型可用 `pnpm typecheck`。其他检查以当前脚本与工具配置为准。
 - **设计器交互**：在 `/designer` 验证受影响操作，覆盖节点选择、属性编辑、撤销重做；修改生命周期或异步逻辑时，补查离开后重进及操作中的按钮状态。
-- **属性或 XML**：编辑人工任务名称、办理人和表单，移动节点后导出再导入，检查字段、节点 ID、连线和 DI 布局保留；非人工任务保持对应字段限制。修改导入逻辑时，另查无效 XML 的原流程与历史恢复、有效文件的警告显示。
+- **属性或 XML**：编辑人工任务名称、办理人、候选用户、候选组和表单，移动节点后导出再导入，检查 Camunda 字段、节点 ID、连线和 DI 布局保留；非人工任务不得出现人工分配字段。修改导入逻辑时，另查无效 XML 的原流程与历史恢复、有效文件的警告显示。
 - **画布或样式**：检查桌面与窄屏布局、中文标签、适应画布，以及导出 XML 的业务字段未被展示调整意外改写。
 - **查询逻辑**：验证搜索、重置、分页与刷新；修改异步处理时验证连续查询后仅最新结果生效，取消请求不产生错误提示。
 - **仅文档**：核对路径、命令、能力描述与实现一致即可，无需启动应用或构建。

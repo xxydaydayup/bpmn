@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { load, BpmnModdle, descriptor, template } from './bpmn-test-utils.mjs'
 
-const { assessLayout, createLayoutGraph, readLayoutPlan } = await load('layout')
+const { assessLayout, createLayoutGraph, readLayoutPlan, normalizeCardConnections, cardPortInset } = await load('layout')
 const { default: LayoutCommand } = await load('LayoutCommand')
 const settings = { width: 184, height: 88, nodeGap: 64, layerGap: 76, edgeGap: 24, padding: 40 }
 const elk = new ELK()
@@ -59,10 +59,22 @@ for (const name of [...samples, 'default', 'service']) {
       }
     }
     assert.equal(plan.connections.length, snapshot.edges.length)
+    const layoutNodes = new Map(nodes.map(node => [node.id, { ...node, type: registry.get(node.id).type }]))
     for (const edge of plan.connections) {
       for (let index = 1; index < edge.waypoints.length; index++) {
         const a = edge.waypoints[index - 1], b = edge.waypoints[index]
         assert.ok(a.x === b.x || a.y === b.y, `${edge.id} is not orthogonal`)
+      }
+      const source = layoutNodes.get(snapshot.edges.find(item => item.id === edge.id).source)
+      const target = layoutNodes.get(snapshot.edges.find(item => item.id === edge.id).target)
+      for (const [point, adjacent, node, side] of [[edge.waypoints[0], edge.waypoints[1], source, 'source'], [edge.waypoints.at(-1), edge.waypoints.at(-2), target, 'target']]) {
+        if (!node || !node.type.endsWith('Task')) continue
+        const horizontal = Math.abs(point.y - adjacent.y) < .1
+        if (horizontal) {
+          assert.ok(point.y >= node.y + cardPortInset - .01 && point.y <= node.y + node.height - cardPortInset + .01, `${edge.id} ${side} port is too close to a rounded corner`)
+        } else {
+          assert.ok(point.x >= node.x + cardPortInset - .01 && point.x <= node.x + node.width - cardPortInset + .01, `${edge.id} ${side} port is too close to a rounded corner`)
+        }
       }
     }
     const command = new LayoutCommand(registry, moddle), context = { plan }
@@ -96,4 +108,42 @@ test('unsupported shapes and incomplete routing are rejected before mutation', a
   const plan = { shapes: [{ ...snapshot.nodes[0], x: 500 }], connections: [{ id: 'missing', waypoints: [] }] }
   assert.throws(() => new LayoutCommand(registry, moddle).execute({ plan }), /已变化/)
   assert.equal((await moddle.toXML(rootElement)).xml, before)
+})
+
+test('card ports avoid rounded corners without rewriting oblique connections', () => {
+  const card = { type: 'bpmn:UserTask', x: 100, y: 100, width: 184, height: 88 }
+  const horizontal = normalizeCardConnections([{ x: 0, y: 100 }, { x: 100, y: 100 }], undefined, card)
+  assert.deepEqual(horizontal, [{ x: 0, y: 100 }, { x: 50, y: 100 }, { x: 50, y: 116 }, { x: 100, y: 116 }])
+
+  const vertical = normalizeCardConnections([{ x: 100, y: 0 }, { x: 100, y: 100 }], undefined, card)
+  assert.deepEqual(vertical, [{ x: 100, y: 0 }, { x: 100, y: 50 }, { x: 116, y: 50 }, { x: 116, y: 100 }])
+
+  const sourcePoints = [{ x: 100, y: 100, original: { x: 100, y: 100 } }, { x: 100, y: 50 }, { x: 200, y: 50 }]
+  const source = normalizeCardConnections(sourcePoints, card)
+  assert.deepEqual(source, [{ x: 116, y: 100, original: { x: 100, y: 100 } }, { x: 116, y: 50 }, { x: 200, y: 50 }])
+  assert.deepEqual(sourcePoints, [{ x: 100, y: 100, original: { x: 100, y: 100 } }, { x: 100, y: 50 }, { x: 200, y: 50 }])
+
+  const oblique = [{ x: 100, y: 100 }, { x: 180, y: 40 }]
+  assert.deepEqual(normalizeCardConnections(oblique, undefined, card), oblique)
+})
+
+test('card connection normalization preserves mixed paths, duplicates, both ports and input immutability', () => {
+  const card = { type: 'bpmn:UserTask', x: 100, y: 100, width: 184, height: 88 }
+  const gateway = { type: 'bpmn:ExclusiveGateway', x: 100, y: 100, width: 50, height: 50 }
+
+  const nonCardPath = [{ x: 0, y: 0 }, { x: 100, y: 50 }, { x: 150, y: 50 }]
+  assert.deepEqual(normalizeCardConnections(nonCardPath, gateway, undefined), nonCardPath)
+
+  const mixedPath = [{ x: 100, y: 100 }, { x: 100, y: 50 }, { x: 180, y: 40 }]
+  assert.deepEqual(normalizeCardConnections(mixedPath, card, undefined), mixedPath)
+
+  const duplicatePath = [{ x: 100, y: 100 }, { x: 100, y: 100 }, { x: 100, y: 0 }]
+  assert.deepEqual(normalizeCardConnections(duplicatePath, card, undefined), [{ x: 116, y: 100 }, { x: 116, y: 100 }, { x: 116, y: 0 }])
+
+  const target = { type: 'bpmn:UserTask', x: 400, y: 90, width: 184, height: 88 }
+  const bothPorts = [{ x: 284, y: 100 }, { x: 330, y: 100 }, { x: 400, y: 100 }]
+  const normalized = normalizeCardConnections(bothPorts, card, target)
+  assert.deepEqual(normalized, [{ x: 284, y: 116 }, { x: 330, y: 116 }, { x: 330, y: 106 }, { x: 400, y: 106 }])
+  assert.deepEqual(normalizeCardConnections(normalized, card, target), normalized)
+  assert.deepEqual(bothPorts, [{ x: 284, y: 100 }, { x: 330, y: 100 }, { x: 400, y: 100 }])
 })

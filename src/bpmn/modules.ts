@@ -2,6 +2,7 @@ import LabelTextRenderer from './LabelTextRenderer'
 import BusinessRenderer from './BusinessRenderer'
 import BusinessContextPad from './BusinessContextPad'
 import CardElementFactory from './CardElementFactory'
+import CardConnectionDocking from './CardConnectionDocking'
 import { diagramTheme } from './theme'
 
 const translations: Record<string, string> = {
@@ -25,6 +26,7 @@ export function createDiagramThemeOptions() {
       businessRenderer: ['type', BusinessRenderer],
       businessContextPad: ['type', BusinessContextPad],
       elementFactory: ['type', CardElementFactory],
+      connectionDocking: ['type', CardConnectionDocking],
       textRenderer: ['type', LabelTextRenderer],
       // The Vue library owns creation; disable the built-in palette service.
       paletteProvider: ['value', null],

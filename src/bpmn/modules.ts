@@ -33,6 +33,9 @@ export function createDiagramThemeOptions() {
       translate: ['value', (template: string, replacements: Record<string, string> = {}) => (translations[template] ?? template).replace(/\{([^}]+)\}/g, (match, key: string) => replacements[key] ?? match)],
     }],
     bpmnRenderer: { ...diagramTheme.renderer },
-    textRenderer: { defaultStyle: { ...diagramTheme.typography }, externalStyle: { ...diagramTheme.typography, fontSize: 13 } },
+    textRenderer: {
+      defaultStyle: { fontFamily: diagramTheme.typography.fontFamily, fontSize: diagramTheme.typography.fontSize },
+      externalStyle: { fontFamily: diagramTheme.typography.fontFamily, fontSize: diagramTheme.typography.externalFontSize },
+    },
   }
 }

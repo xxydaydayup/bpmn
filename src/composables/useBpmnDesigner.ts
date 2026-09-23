@@ -2,13 +2,14 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, type Ref } from 'vue'
 import Modeler from 'bpmn-js/lib/Modeler'
 import type { Element, Label, Shape, Connection, ModdleElement } from 'bpmn-js/lib/model/Types'
 import type CommandStack from 'diagram-js/lib/command/CommandStack'
+import type EventBus from 'diagram-js/lib/core/EventBus'
 import type ElementFactory from 'bpmn-js/lib/features/modeling/ElementFactory'
 import { is } from 'bpmn-js/lib/util/ModelUtil'
 import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json'
 import camundaPlatformBehaviors from 'camunda-bpmn-js-behaviors/lib/camunda-platform'
 import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
 import { createDiagramThemeOptions } from '@/bpmn/modules'
-import { diagramTheme } from '@/bpmn/theme'
+import { createThemeStore, diagramTheme, type ThemeId, type ThemeSnapshot } from '@/bpmn/theme'
 import { presentNode } from '@/bpmn/icons'
 import { assessLayout, createLayoutGraph, readLayoutPlan, supportedLayoutTypes, type LayoutSnapshot } from '@/bpmn/layout'
 import LayoutRunner from '@/bpmn/LayoutRunner'
@@ -40,6 +41,11 @@ const propertyNames: Partial<Record<NodePropertyField, string>> = {
   candidateGroups: 'camunda:candidateGroups', formKey: 'camunda:formKey',
 }
 
+interface TextRenderer {
+  getDefaultStyle(): Record<string, unknown>
+  getExternalStyle(): Record<string, unknown>
+}
+
 export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
   const ready = ref(false)
   const initialized = ref(false)
@@ -58,13 +64,40 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
   const canArrange = ref(false)
   const layoutReason = ref('')
   const layoutStatus = ref('')
+  const themeStore = createThemeStore()
+  const themeSnapshot = ref<ThemeSnapshot>(themeStore.getSnapshot())
   let modeler: Modeler | undefined
   let activeElement: Element | undefined
   let disposed = false
   let successfulParses = 0
   const layoutRunner = new LayoutRunner()
   let resizeObserver: ResizeObserver | undefined
+  const unsubscribeTheme = themeStore.subscribe((snapshot) => {
+    themeSnapshot.value = snapshot
+    refreshTheme()
+  })
   const layoutSettings = { ...diagramTheme.layout, width: diagramTheme.card.width, height: diagramTheme.card.height }
+
+  function refreshTheme() {
+    if (!modeler) return
+    const textRenderer = modeler.get<TextRenderer>('textRenderer')
+    Object.assign(textRenderer.getDefaultStyle(), {
+      fontFamily: themeSnapshot.value.typography.fontFamily,
+      fontSize: themeSnapshot.value.typography.fontSize,
+    })
+    Object.assign(textRenderer.getExternalStyle(), {
+      fontFamily: themeSnapshot.value.typography.fontFamily,
+      fontSize: themeSnapshot.value.typography.externalFontSize,
+    })
+    const eventBus = modeler.get<EventBus>('eventBus')
+    eventBus.fire('diagram.theme.changed', { theme: themeSnapshot.value })
+    const elements = modeler.get<ElementRegistry>('elementRegistry').getAll().filter((element) => element.parent)
+    eventBus.fire('elements.changed', { elements })
+  }
+
+  function setTheme(id: ThemeId) {
+    return themeStore.setTheme(id)
+  }
 
   function snapshotLayout(): LayoutSnapshot {
     if (!modeler) return { id: 'empty', nodes: [], edges: [], unsupported: [] }
@@ -480,6 +513,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
 
   onBeforeUnmount(() => {
     disposed = true
+    unsubscribeTheme()
     resizeObserver?.disconnect()
     layoutRunner.destroy()
     modeler?.destroy()
@@ -492,5 +526,6 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     fitViewport, importXML, exportXML, updateProperty, undo, redo,
     propertyError, validationIssues, hasValidated, checkWorkflow, locateElement, showProcessProperties,
     processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
+    themeSnapshot, setTheme, refreshTheme,
   }
 }

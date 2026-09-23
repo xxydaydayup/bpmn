@@ -8,7 +8,7 @@ import DiagramIcon from '@/components/designer/DiagramIcon.vue'
 import WorkflowValidationPanel from '@/components/designer/WorkflowValidationPanel.vue'
 import { workflowTemplates } from '@/bpmn/templates'
 import { useBpmnDesigner } from '@/composables/useBpmnDesigner'
-import { diagramCSSVariables } from '@/bpmn/theme'
+import { diagramCSSVariables, themePresets, type ThemeId } from '@/bpmn/theme'
 import '@/styles/designer.css'
 import 'bpmn-js/dist/assets/diagram-js.css'
 import 'bpmn-js/dist/assets/bpmn-js.css'
@@ -36,9 +36,16 @@ const {
   fitViewport, importXML, exportXML, updateProperty, undo, redo,
   propertyError, validationIssues, checkWorkflow, locateElement, showProcessProperties,
   processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
+  themeSnapshot, setTheme,
 } = useBpmnDesigner(container)
 const xmlDialogBusy = computed(() => busy.value || readingXMLFile.value || applyingXML.value || copyingXML.value)
-const canvasStyle = diagramCSSVariables()
+const canvasStyle = computed(() => diagramCSSVariables(themeSnapshot.value))
+const themeOptions = Object.values(themePresets)
+
+function handleThemeChange(event: Event) {
+  const id = (event.target as HTMLSelectElement).value as ThemeId
+  setTheme(id)
+}
 
 async function togglePanel(panel: 'library' | 'properties') {
   if (panel === 'library') libraryCollapsed.value = !libraryCollapsed.value
@@ -197,6 +204,7 @@ async function copyXML() {
     <header class="designer-document-header">
       <div class="designer-document-title"><div class="designer-breadcrumb">工作空间 <span>/</span> 流程设计</div><div class="designer-title-line"><h1>{{ processName }}</h1><span class="designer-draft">本地草稿</span></div></div>
       <div class="designer-document-actions">
+        <label class="designer-theme-picker"><span>主题</span><select :value="themeSnapshot.id" aria-label="选择画布主题" :disabled="!initialized || busy" @change="handleThemeChange"><option v-for="theme in themeOptions" :key="theme.id" :value="theme.id">{{ theme.label }}</option></select></label>
         <button class="designer-button" :disabled="!initialized || busy" aria-label="流程模板" title="流程模板" @click="templateError = ''; templateDialogVisible = true"><DiagramIcon name="template" /><span>流程模板</span></button>
         <button class="designer-button" :disabled="!initialized || busy || previewLoading" aria-label="导入 XML" title="导入 XML" @click="openXMLImport"><DiagramIcon name="upload" /><span>导入 XML</span></button>
         <button class="designer-button" :disabled="!ready || busy" aria-label="检查流程" title="检查流程" @click="inspectWorkflow"><DiagramIcon name="check" /><span>流程检查</span></button>
@@ -317,4 +325,11 @@ async function copyXML() {
 .xml-dialog-actions .el-button + .el-button { margin-left: 0; }
 .xml-preview { display: block; width: 100%; height: 50vh; resize: none; padding: 16px; border: 1px solid #dce5df; border-radius: 5px; background: #fafcfb; color: #243c36; font: 13px/1.7 'SFMono-Regular', Consolas, monospace; tab-size: 2; }
 .xml-preview:focus { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
+.designer-theme-picker { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: #718176; font-size: 12px; }
+.designer-theme-picker select { min-width: 88px; height: 32px; padding: 0 24px 0 10px; border: 1px solid #dce5df; border-radius: 4px; background: #fff; color: #293a34; font: inherit; }
+.designer-theme-picker select:focus { outline: 2px solid var(--el-color-primary); outline-offset: 1px; }
+@media (max-width: 760px) {
+  .designer-theme-picker > span { display: none; }
+  .designer-theme-picker select { min-width: 76px; height: 33px; padding-left: 8px; padding-right: 18px; }
+}
 </style>

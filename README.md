@@ -75,7 +75,7 @@ pnpm preview    # 预览构建结果
 
 - 标准节点名称保存为 BPMN 的 `name` 属性。
 - 办理人、候选用户、候选组和表单保存为 `camunda:assignee`、`camunda:candidateUsers`、`camunda:candidateGroups` 和 `camunda:formKey`。
-- Camunda 模型扩展由 `camunda-bpmn-moddle` 注册，命名空间为 `http://camunda.org/schema/1.0/bpmn`；平台级建模联动由 `camunda-bpmn-js-behaviors` 提供。
+- Camunda 模型扩展由 `camunda-bpmn-moddle` 注册，命名空间为 `http://camunda.org/schema/1.0/bpmn`；平台级建模联动由 `camunda-bpmn-js-behaviors` 提供。职责区别和最小示例见 [Camunda 7 建模依赖说明](./docs/camunda-modeling.md)。
 - 初始完整流程与布局：`src/bpmn/requirement-process.bpmn`。
 - XML 导出后再导入，可以继续编辑以上属性与布局。导入无效 XML 会尝试保留原流程；解析阶段失败也保留撤销历史。
 

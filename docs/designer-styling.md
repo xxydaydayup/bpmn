@@ -1,16 +1,16 @@
 # 设计器样式维护说明
 
-这套界面沿用 Vue、Element Plus 和 bpmn-js；人工/服务任务采用业务卡片，图标为本地 Tabler Icons 3.47.0。外观由开发者统一配置，页面没有逐节点改色功能。
+这套界面沿用 Vue、Element Plus 和 bpmn-js；人工/服务任务采用业务卡片，图标为本地 Tabler Icons 3.47.0。画布支持顶部工具栏切换预设主题；主题只影响运行时展示，页面暂未开放逐节点改色功能。
 
 ## 修改入口
 
 | 需求 | 文件与配置 |
 | --- | --- |
-| 画布背景、点阵、强调色 | `src/bpmn/theme.ts` → `canvas` |
+| 预设主题、画布背景和强调色 | `src/bpmn/theme.ts` → `themePresets`、`canvas` |
 | 默认节点、连线与文字颜色 | 同文件 → `renderer`、`colors` |
 | 中文字体与字号 | 同文件 → `typography` |
-| 卡片尺寸、圆角、线宽、图标大小、内边距 | 同文件 → `card` |
-| 自动布局的节点、层与连线间距 | 同文件 → `layout` |
+| 卡片尺寸、圆角、线宽、图标大小、内边距 | 同文件 → `card`；运行时主题切换保持几何不变 |
+| 自动布局的节点、层与连线间距 | 同文件 → `layout`；运行时主题切换保持布局参数不变 |
 | 替换 Tabler 图标 | `src/bpmn/icons.ts` 的 SVG 导入与 `diagramIcons` |
 | 节点库分组与名称 | 同文件 → `nodePresentation`、`libraryGroups` |
 | 工具栏、工作区布局和响应式断点 | `src/styles/designer.css` |
@@ -18,7 +18,7 @@
 | 新的节点绘制方式 | `src/bpmn/BusinessRenderer.ts` |
 | 快捷操作的图标、中文名称 | `src/bpmn/BusinessContextPad.ts` |
 
-例如把 `card.width` 改为 `200`、`radius` 改为 `12`，会同时影响新建任务和自动整理后的任务；已有图的尺寸仍从 DI 读取。需要统一现有图时点击“整理布局”，或重新导入尺寸小于新约定的普通流程。颜色和字体变更立即影响默认渲染，导入的显式颜色继续优先。
+顶部选择器切换主题时，`useBpmnDesigner` 会更新文本渲染器样式并触发 bpmn-js 的 `elements.changed` 重绘事件；视口、选择状态、DI 几何和命令栈保持不变。编辑 `themePresets` 中的 `card.width`、`layout` 等几何值会影响新建任务和自动整理后的任务；已有图的尺寸仍从 DI 读取。需要统一现有图时点击“整理布局”，或重新导入尺寸小于新约定的普通流程。导入的显式颜色继续优先。
 
 图标文件放在 `src/assets/tabler/`，新增时保留该目录的 MIT 许可及来源说明。渲染器只使用这些可信本地 SVG；用户输入的节点名称以文本绘制，不作为 HTML 执行。外层 Element Plus 的应用级主题位于 `src/styles/main.css`。
 

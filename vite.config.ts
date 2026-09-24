@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
     server: {
+      host: true,
       port: 5173,
       proxy: {
         '/api/camunda': {

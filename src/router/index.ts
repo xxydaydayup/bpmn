@@ -34,6 +34,18 @@ const router = createRouter({
           meta: { title: '流程验证' },
         },
         {
+          path: 'workflow-prototype',
+          name: 'workflow-prototype',
+          component: () => import('@/views/WorkflowPrototypeView.vue'),
+          meta: { title: '控制面原型' },
+        },
+        {
+          path: 'camunda-console',
+          name: 'camunda-console',
+          component: () => import('@/views/CamundaConsoleView.vue'),
+          meta: { title: 'Camunda 管理台' },
+        },
+        {
           path: ':pathMatch(.*)*',
           component: () => import('@/views/NotFoundView.vue'),
           meta: { title: '页面不存在' },

@@ -58,6 +58,4 @@
 
 ## 专项文档
 
-- 创建、读取或更新需求/事项 Markdown 前，读取[事项跟踪约定](./docs/agents/issue-tracker.md)。
-- 分诊事项或修改状态前，读取[状态映射](./docs/agents/triage-labels.md)。
 - 探索业务术语或架构决策前，读取[领域文档约定](./docs/agents/domain.md)。

@@ -52,16 +52,18 @@ pnpm preview    # 预览构建结果
 - Axios 请求封装：基础地址、超时、HTTP 错误处理和类型化响应。
 - `useTable`：查询、重置、刷新、分页、加载状态、错误状态、请求取消和旧结果隔离。
 - 表格示例使用本地静态数据，无需后端即可运行。
-- BPMN 编辑器：默认展示“开始 → 提交需求 → 确认需求 → 结束”，支持绘图、XML 文件或粘贴导入、XML 编辑与复制、导出和适应画布。
+- BPMN 编辑器：默认展示“开始 → 提交需求 → 确认需求 → 结束”，支持绘图、XML 文件或粘贴导入、XML 编辑与复制、导出、当前画布部署和适应画布。
 - 自定义属性面板：编辑 Camunda 办理人/候选用户/候选组/表单、UserTask/ServiceTask 多实例，以及 ServiceTask 的 External/Java 执行方式；也可编辑流程/节点/连线基础字段和排他分支。
 - 六个常用审批模板，以及带元素定位的基础连接、名单和一层并行结构检查；检查错误会阻止文件导出。
 - Camunda 7 引擎联调页：通过 Vite 开发代理部署 BPMN、查询流程定义、启动实例、查询/领取/完成人工任务和查看活动树。
 - Camunda REST 管理台：`/camunda-console` 提供运行总览、部署与定义查询、定义/实例挂起恢复、实例终止、活动树与变量查看、任务与 External Task 查询、Job/Incident 异常查看、历史查询、JSON 导出和 Camunda 用户操作日志；页面直接调用官方 REST，仅用于开发联调。
 - 流程验证工作台：在 `/camunda-validation` 选择串行审批或金额分支审批，自动部署唯一测试版本、启动并完成人工任务、核对历史和断言；默认级联清理测试部署，可按需保留数据。
+- 后端业务流程页：`/workflow-business` 通过 `/api/v1` 浏览任务模板、启动业务任务实例、查询并完成人工任务；开发模式可用 Camunda 状态核对业务返回。
+- 设计器同时提供“部署流程”（引擎验证）和“发布任务模板”（业务发布），结果和失败状态互不覆盖。
 - 统一的青绿工作台、Tabler 节点库与快捷操作、人工/服务任务卡片；主题、图标映射可由开发者调整。
 - 旧尺寸普通流程导入时自动扩大卡片并重排，已适配图保留手动布局；“整理布局”可一次撤销、重做。
 
-当前没有 Go 包装层、登录权限、流程设计稿服务端保存或表单运行时；Camunda REST 直连只用于开发联调。BPMN 不自动保存，离开页面前请导出文件，或通过“编辑 XML”复制草稿保存。
+当前仓库不包含后端实现、登录权限、流程设计稿服务端保存或表单运行时；已接入外部后端的任务模板、业务实例和人工任务接口。Camunda REST 直连或后端透传只用于开发联调与受控验证。BPMN 不自动保存，离开页面前请导出文件，或通过“编辑 XML”复制草稿保存。
 
 `/camunda-console` 是面向流程管理员/运维人员的引擎控制面，不是业务审批入口。它展示和操作 Camunda 官方 REST 能力，操作日志也是 Camunda 引擎用户操作历史，不等于平台审计。正式接入业务系统后，应由 Go/BFF 代理这些能力，补充登录、权限、租户隔离、变量脱敏、幂等、审计和业务语义；前端不应持有 Camunda 管理员凭据。没有业务系统时，可使用 `/camunda-validation` 验证已有串行审批、金额分支场景的部署、启动、任务流转和历史记录。
 
@@ -90,6 +92,8 @@ $env:CAMUNDA_TEST_BASE_URL = 'http://192.168.124.202:8085/engine-rest'
 node scripts/camunda-console-smoke.mjs
 ```
 
+观察同一个 Job 反复失败、剩余重试次数递减以及最终出现 Incident，可使用 [Job 重试与 Incident 演示](./docs/research/camunda-job-retry-demo.md)。该示例会为自动验证创建唯一测试部署并在结束时清理。
+
 ## 需求确认流程示例
 
 打开 `/designer`。初始流程包含两个人工任务：
@@ -114,6 +118,8 @@ node scripts/camunda-console-smoke.mjs
 点击“导入 XML”可直接粘贴 XML，也可通过“选择文件”载入 `.bpmn` 或 `.xml` 文件，检查或修改后点击“导入到画布”。空白内容不能提交；导入失败时弹窗保留草稿并显示错误，可继续修正，原流程恢复沿用设计器的导入逻辑。
 
 应用或导入成功会替换当前流程并重置画布撤销记录。画布的“导出 XML”始终导出已经应用的内容，`.bpmn` 文件本身就是 XML。
+
+点击“部署流程”会检查并固定当前画布的 XML 快照；未应用的 XML 草稿不会参与部署。部署目前支持单个 `isExecutable="true"` 的流程，基础检查错误会阻止提交，警告会在确认弹窗列出。确认后通过 Vite 开发代理调用 Camunda 7，保留现有历史数据保留期缺省补齐和重复过滤行为，不自动启动实例。成功后显示 deploymentId 及引擎实际返回的流程定义 ID、版本；重复过滤没有返回新定义时应到管理台核对。超时或连接中断后先核对引擎结果再重试。弹窗中的部署结果和继续编辑的本地设计稿相互独立，离开页面前仍需导出或复制原稿。正式发布仍需 Go/BFF 承接鉴权、权限、幂等、审计和设计稿追溯。
 
 ### 常用流程设计
 
@@ -151,7 +157,7 @@ node scripts/camunda-console-smoke.mjs
 - 错误：标识不合法或重复、缺开始/结束、连接缺失或无效、节点不可达或无法到达结束、排他分支缺条件、默认引用或条件冲突、人工任务缺少分配方式、多实例缺少来源/元素变量、服务任务缺少执行方式或 topic。
 - 并行错误：分叉/汇合不配对、分支跨接或绕过汇合、从外部进入分支、分支内回路、把排他选择的多条路径直接作为并行汇合入线，以及并行出线带条件或默认分支。
 - 警告：排他分支缺默认出线、并行区域外的人工任务具有多条出线，以及超出当前范围的结构。表单为空不报错；并行区域外的合法回路允许保留。
-- 有错误时禁止下载文件；“编辑 XML”的查看、编辑和复制，以及文件/粘贴导入仍可使用。仅有警告时允许下载。
+- 有错误时禁止下载文件和从设计器部署；“编辑 XML”的查看、编辑和复制，以及文件/粘贴导入仍可使用。仅有警告时允许下载，并可在部署确认弹窗核对后提交。
 
 检查面向单个流程中的普通开始/结束事件、人工任务、服务任务、排他网关和一层并行网关。嵌套并行提示警告并跳过该流程的并行配对检查，仍检查基础连接；子流程、特殊事件等其他高级节点会提示警告并跳过该流程的路径检查，仍检查标识和顶层任务配置。多流程协作提示范围限制。检查通过不代表引擎可执行，不验证条件求值、用户有效性或运行时取消行为。
 
@@ -189,7 +195,21 @@ node scripts/camunda-console-smoke.mjs
 
 ### Go 后端对接约定
 
-当前 `/camunda` 页面通过 Vite 代理访问 Camunda 7 原生 REST，完成部署、定义查询、按 key 启动、任务查询/领取/完成和活动树查询。开发代理目标由 `CAMUNDA_PROXY_TARGET` 指定，Basic Auth 可由仅供服务端读取的 `CAMUNDA_PROXY_AUTH` 配置；禁止将引擎凭据写入 `VITE_` 变量。Vite 代理不会进入生产构建，生产环境应由 Go/BFF 承接认证、权限和稳定业务 API。
+当前有两条明确分开的通道：`/api/v1` 是后端业务 Interface，`/engine-rest` 是 Camunda 官方语义的开发验证 Interface。`/camunda`、`/camunda-validation` 和 `/camunda-console` 通过 Vite 的 `/api/camunda` 代理访问引擎；`/workflow-business` 和“发布任务模板”通过 `/api/v1` 使用后端业务接口。
+
+开发代理目标分别由 `API_PROXY_TARGET` 和 `CAMUNDA_PROXY_TARGET` 指定。Basic Auth 使用 `API_PROXY_AUTH` / `CAMUNDA_PROXY_AUTH`，格式为 `username:password`，只能由 Vite 服务端或生产服务器读取；禁止将凭据写入 `VITE_` 变量。`VITE_CAMUNDA_ACCESS_MODE` 和 `VITE_CAMUNDA_TENANT` 仅控制页面来源提示。
+
+`VITE_WORKFLOW_DEVTOOLS=false` 时，侧边栏隐藏且路由拦截引擎联调、流程验证和 Camunda 管理台；普通业务入口只调用 `BusinessWorkflowGateway`。Vite 代理不会进入生产构建，生产环境应由 Go/BFF 承接认证、权限、租户隔离、变量脱敏、幂等和平台审计。
+
+后端代理读写验证记录见 [后端流程接口与 Camunda 代理验证](./docs/research/camunda-backend-proxy-verification.md)。可运行隔离烟测复查透传写操作；测试使用 UUID 名称并在结束时清理自己的 Camunda 部署。
+
+```powershell
+$env:CAMUNDA_DIRECT_BASE_URL = 'http://192.168.124.202:8085/engine-rest'
+$env:CAMUNDA_PROXY_BASE_URL = 'http://192.168.124.202:9000/engine-rest'
+$env:CAMUNDA_PROXY_AUTH = '<username>:<password>'
+$env:CAMUNDA_TEST_TENANT = '<tenant-id>'
+node scripts/camunda-proxy-smoke.mjs
+```
 
 接入 Go 后端保存时，应保留流程设计稿原文并单独记录部署产物和引擎返回的定义版本；不要从 Camunda 引擎模型重新导出覆盖设计原稿，以免丢失布局或扩展。
 
@@ -212,7 +232,7 @@ src/
 
 ## 接入后端
 
-按需复制 `.env.example` 为 `.env.local`。默认业务请求前缀为 `/api`；`/api/camunda` 单独代理到 `CAMUNDA_PROXY_TARGET` 并重写为 `/engine-rest`，只用于开发联调。
+按需复制 `.env.example` 为 `.env.local`。默认业务请求前缀为 `/api`：业务 Gateway 调用 `/api/v1`；`/api/camunda` 单独代理到 `CAMUNDA_PROXY_TARGET` 并重写为 `/engine-rest`，只用于开发联调。不要把包含密码的 `.env.local` 提交到版本库。
 
 `request<T>()` 返回 HTTP 响应体，不预设后端的业务状态码或 token 协议，也不自动显示错误弹窗。后端协议确定后，再在请求层统一适配。
 

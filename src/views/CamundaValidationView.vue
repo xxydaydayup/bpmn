@@ -7,6 +7,7 @@ import {
 } from 'element-plus'
 import { Delete, VideoPlay } from '@element-plus/icons-vue'
 import { camundaGateway } from '@/api/camunda/gateway'
+import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 import type {
   CamundaHistoricActivity,
   CamundaHistoricProcessInstance,
@@ -22,6 +23,8 @@ type ScenarioId = 'serial' | 'amount'
 type ValidationStepKey = 'deploy' | 'start' | 'tasks' | 'history' | 'cleanup'
 type StepState = 'wait' | 'process' | 'success' | 'error'
 type CaseState = 'pending' | 'running' | 'passed' | 'failed'
+
+const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
 
 interface CasePlan {
   id: string
@@ -357,10 +360,11 @@ function cleanupLabel(cleanup: ValidationRun['cleanup']) {
     <div class="page-heading">
       <div>
         <h1>流程验证工作台</h1>
-        <p>用真实 Camunda 7 REST 执行模板，并把每一步结果展示出来</p>
+        <p>通过{{ workflowRuntime.engineLabel }}执行模板，并把每一步结果展示出来</p>
       </div>
       <ElButton :icon="Delete" :disabled="running" @click="clearResult">清空结果</ElButton>
     </div>
+    <ElAlert v-if="workflowRuntime.tenantId" type="info" :closable="false" show-icon class="validation-boundary" :title="'当前租户：' + workflowRuntime.tenantId + '；验证结果仅覆盖该租户。'" />
 
     <ElAlert
       title="这里验证的是引擎执行层：部署、启动、任务顺序、网关分支和流程结束。当前没有业务系统，因此不会验证真实登录、审批权限、业务表单或审批账本。"

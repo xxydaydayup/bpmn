@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: env.API_PROXY_TARGET || 'http://localhost:8080',
           changeOrigin: true,
+          ...(env.API_PROXY_AUTH ? { auth: env.API_PROXY_AUTH } : {}),
         },
       },
     },

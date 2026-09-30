@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ElButton, ElIcon, ElMenu, ElMenuItem } from 'element-plus'
-import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting } from '@element-plus/icons-vue'
+import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting, Tickets } from '@element-plus/icons-vue'
 // import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Monitor, Setting } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 
 const app = useAppStore()
 const route = useRoute()
+const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
 const isDesigner = computed(() => route.path === '/designer')
 const collapsed = computed(() => isDesigner.value || app.sidebarCollapsed)
 </script>
@@ -35,19 +37,23 @@ const collapsed = computed(() => isDesigner.value || app.sidebarCollapsed)
           <ElIcon><Connection /></ElIcon>
           <template #title><span>流程设计</span></template>
         </ElMenuItem>
-        <ElMenuItem index="/camunda" aria-label="Camunda 7 引擎联调">
+        <ElMenuItem v-if="workflowRuntime.developerToolsEnabled" index="/camunda" aria-label="Camunda 7 引擎联调">
           <ElIcon><VideoPlay /></ElIcon>
           <template #title><span>引擎联调</span></template>
         </ElMenuItem>
-        <ElMenuItem index="/camunda-validation" aria-label="流程验证">
+        <ElMenuItem v-if="workflowRuntime.developerToolsEnabled" index="/camunda-validation" aria-label="流程验证">
           <ElIcon><CircleCheck /></ElIcon>
           <template #title><span>流程验证</span></template>
+        </ElMenuItem>
+        <ElMenuItem v-if="workflowRuntime.businessEnabled" index="/workflow-business" aria-label="业务流程">
+          <ElIcon><Tickets /></ElIcon>
+          <template #title><span>业务流程</span></template>
         </ElMenuItem>
         <!-- <ElMenuItem index="/workflow-prototype" aria-label="流程控制面原型">
           <ElIcon><Monitor /></ElIcon>
           <template #title><span>控制面原型</span></template>
         </ElMenuItem> -->
-        <ElMenuItem index="/camunda-console" aria-label="Camunda 管理台">
+        <ElMenuItem v-if="workflowRuntime.developerToolsEnabled" index="/camunda-console" aria-label="Camunda 管理台">
           <ElIcon><Setting /></ElIcon>
           <template #title><span>Camunda 管理台</span></template>
         </ElMenuItem>

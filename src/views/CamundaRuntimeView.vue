@@ -7,6 +7,7 @@ import {
 import { Refresh, Search, Upload, VideoPlay } from '@element-plus/icons-vue'
 import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
 import { camundaGateway } from '@/api/camunda/gateway'
+import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 import type {
   CamundaActivityInstance,
   CamundaProcessDefinition,
@@ -18,6 +19,7 @@ import type {
 type RuntimeTab = 'deploy' | 'instances' | 'tasks'
 interface ActivityTreeNode { id: string; label: string; children?: ActivityTreeNode[] }
 
+const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
 const activeTab = ref<RuntimeTab>('deploy')
 const xml = ref(initialDiagram)
 const deploymentName = ref('需求提交与确认')
@@ -218,9 +220,10 @@ onMounted(loadDefinitions)
 <template>
   <section class="runtime-page">
     <div class="page-heading">
-      <div><h1>Camunda 7 引擎联调</h1><p>Camunda 原生 REST · 开发代理</p></div>
+      <div><h1>Camunda 7 引擎联调</h1><p>{{ workflowRuntime.engineLabel }}</p></div>
       <ElButton :icon="Refresh" :loading="busy.definitions" :disabled="busyAny" @click="loadDefinitions">刷新流程定义</ElButton>
     </div>
+    <ElAlert v-if="workflowRuntime.tenantId" type="info" :closable="false" show-icon class="runtime-alert" :title="'当前租户：' + workflowRuntime.tenantId + '；查询和操作由后端代理执行租户隔离。'" />
     <ElAlert v-if="error" :title="error" type="error" :closable="false" show-icon class="runtime-alert" />
 
     <nav class="runtime-tabs" aria-label="引擎联调阶段">

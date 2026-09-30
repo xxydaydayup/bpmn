@@ -6,15 +6,19 @@ import NodePropertiesPanel from '@/components/designer/NodePropertiesPanel.vue'
 import NodeLibrary from '@/components/designer/NodeLibrary.vue'
 import DiagramIcon from '@/components/designer/DiagramIcon.vue'
 import WorkflowValidationPanel from '@/components/designer/WorkflowValidationPanel.vue'
+import DesignerDeployment from '@/components/designer/DesignerDeployment.vue'
+import DesignerTaskTemplate from '@/components/designer/DesignerTaskTemplate.vue'
 import { workflowTemplates } from '@/bpmn/templates'
 import { useBpmnDesigner } from '@/composables/useBpmnDesigner'
 import { diagramCSSVariables, themePresets, type ThemeId } from '@/bpmn/theme'
+import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 import '@/styles/designer.css'
 import 'bpmn-js/dist/assets/diagram-js.css'
 import 'bpmn-js/dist/assets/bpmn-js.css'
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css'
 
 const container = ref<HTMLDivElement>()
+const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
 const fileInput = ref<HTMLInputElement>()
 const xmlDialogVisible = ref(false)
 const xmlDraft = ref('')
@@ -33,7 +37,7 @@ const libraryCollapsed = ref(false)
 const propertiesVisible = ref(!window.matchMedia('(max-width: 760px)').matches)
 const {
   ready, initialized, busy, error, warning, selectedNode, canUndo, canRedo,
-  fitViewport, importXML, exportXML, updateProperty, undo, redo,
+  fitViewport, importXML, exportXML, prepareDeployment, updateProperty, undo, redo,
   propertyError, validationIssues, checkWorkflow, locateElement, showProcessProperties,
   processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
   themeSnapshot, setTheme,
@@ -208,7 +212,9 @@ async function copyXML() {
         <button class="designer-button" :disabled="!initialized || busy" aria-label="流程模板" title="流程模板" @click="templateError = ''; templateDialogVisible = true"><DiagramIcon name="template" /><span>流程模板</span></button>
         <button class="designer-button" :disabled="!initialized || busy || previewLoading" aria-label="导入 XML" title="导入 XML" @click="openXMLImport"><DiagramIcon name="upload" /><span>导入 XML</span></button>
         <button class="designer-button" :disabled="!ready || busy" aria-label="检查流程" title="检查流程" @click="inspectWorkflow"><DiagramIcon name="check" /><span>流程检查</span></button>
-        <button class="designer-button primary" :disabled="!ready || busy" aria-label="导出 XML" title="导出 XML" @click="exportDiagram"><DiagramIcon name="download" /><span>导出 XML</span></button>
+        <button class="designer-button" :disabled="!ready || busy" aria-label="导出 XML" title="导出 XML" @click="exportDiagram"><DiagramIcon name="download" /><span>导出 XML</span></button>
+        <DesignerDeployment :disabled="!ready || xmlDialogBusy || previewLoading || xmlDialogVisible || templateDialogVisible" :prepare="prepareDeployment" @locate="locateElement" />
+        <DesignerTaskTemplate v-if="workflowRuntime.businessEnabled" :disabled="!ready || xmlDialogBusy || previewLoading || xmlDialogVisible || templateDialogVisible" :prepare="prepareDeployment" @locate="locateElement" />
       </div>
     </header>
     <div class="designer-surface">

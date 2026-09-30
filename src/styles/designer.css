@@ -120,4 +120,10 @@
   .designer-canvas-status > span:last-child, .designer-footer > span:last-child { display: none; }
   .designer-footer { padding: 0 13px; font-size: 9px; }
 }
+@media (max-width: 480px) {
+  .designer-document-header { flex-wrap: wrap; align-content: center; flex-basis: 110px; gap: 6px; }
+  .designer-document-title, .designer-document-actions { width: 100%; }
+  .designer-document-actions { justify-content: flex-end; }
+  .designer-title-line h1 { font-size: 15px; }
+}
 @media (prefers-reduced-motion: reduce) { .designer-page * { transition: none !important; } }

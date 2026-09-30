@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ElAlert, ElButton, ElDialog, ElForm, ElFormItem, ElInput, ElMessage, ElMessageBox, ElOption, ElPagination, ElSelect, ElTable, ElTableColumn, ElTag } from 'element-plus'
 import { CircleCheckFilled, Clock, Connection, Document, Download, Files, Monitor, Refresh, Search, Setting, Tickets, Upload, WarningFilled } from '@element-plus/icons-vue'
 import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
 import { camundaGateway } from '@/api/camunda/gateway'
+import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 import { createLatestQueryScope } from '@/utils/latestQuery'
 import { collectActiveActivityIds } from '@/utils/activityMarkers'
 import ReadOnlyProcessDiagram from '@/components/camunda/ReadOnlyProcessDiagram.vue'
@@ -13,6 +15,7 @@ import type { CamundaActivityInstance, CamundaDeployment, CamundaExternalTask, C
 type ConsoleTab = 'overview' | 'definitions' | 'instances' | 'tasks' | 'operations' | 'history' | 'audit'
 type TaskTab = 'user' | 'external'
 type HistoryTab = 'instances' | 'tasks' | 'activities' | 'variables'
+const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
 const tabs: Array<{ key: ConsoleTab; label: string; icon: typeof Monitor }> = [
   { key: 'overview', label: '运行总览', icon: Monitor },
   { key: 'definitions', label: '流程定义', icon: Document },
@@ -23,6 +26,8 @@ const tabs: Array<{ key: ConsoleTab; label: string; icon: typeof Monitor }> = [
   { key: 'audit', label: '操作日志', icon: Setting },
 ]
 const activeTab = ref<ConsoleTab>('overview')
+const route = useRoute()
+let definitionLoadRevision = 0
 const taskTab = ref<TaskTab>('user')
 const historyTab = ref<HistoryTab>('instances')
 const errors = reactive<Record<string, string>>({})
@@ -173,9 +178,15 @@ function clearInstance() {
   selectedVariables.value = undefined
   errors['instances-detail'] = ''
 }
-function loadDefinitions() {
+async function loadDefinitions() {
+  const revision = ++definitionLoadRevision
+  const definitionId = (applied.definition as { processDefinitionId?: string }).processDefinitionId
   clearDefinition()
-  return loadPage('definitions', applied.definition, camundaGateway.listDefinitions, camundaGateway.countDefinitions, definitions)
+  await loadPage('definitions', applied.definition, camundaGateway.listDefinitions, camundaGateway.countDefinitions, definitions, 'deployTime', 'desc')
+  if (disposed || revision !== definitionLoadRevision || errors.definitions || !definitionId) return
+  const definition = definitions.value.find(item => item.id === definitionId)
+  if (definition) await selectDefinition(definition)
+  else errors['definitions-detail'] = `未找到流程定义 ${definitionId}，可能已被删除或当前引擎不可见。`
 }
 function loadInstances() {
   clearInstance()
@@ -388,14 +399,37 @@ function refreshActiveTab() {
 }
 watch(taskTab, () => { if (activeTab.value === 'tasks') void loadTasks() })
 watch(historyTab, () => { if (activeTab.value === 'history') void loadHistory() })
-onMounted(() => { void refreshOverview() })
+async function applyDefinitionRoute() {
+  if (disposed) return
+  const definitionId = typeof route.query.definitionId === 'string' ? route.query.definitionId.trim() : ''
+  if (definitionId || route.query.tab === 'definitions') {
+    activeTab.value = 'definitions'
+    definitionSearchBy.value = definitionId ? 'processDefinitionId' : 'nameLike'
+    definitionSearch.value = definitionId
+    applied.definition = definitionId ? { processDefinitionId: definitionId } : {}
+    pages.definitions!.page = 1
+    await loadDefinitions()
+  } else {
+    definitionLoadRevision += 1
+    queries.cancel('definitions')
+    clearDefinition()
+    definitionSearchBy.value = 'nameLike'
+    definitionSearch.value = ''
+    applied.definition = {}
+    pages.definitions!.page = 1
+    activeTab.value = 'overview'
+    await refreshOverview()
+  }
+}
+watch(() => [route.query.definitionId, route.query.tab], () => { void applyDefinitionRoute() })
+onMounted(applyDefinitionRoute)
 onBeforeUnmount(() => { disposed = true; queries.dispose() })
 </script>
 
 <template>
   <section class="console-page">
     <div class="console-heading">
-      <div><div class="console-eyebrow">Camunda Platform REST · 开发联调</div><h1>Camunda 管理台</h1><p>官方 REST 能力的真实查询与受控运维入口。生产环境应由 Go 服务承接认证和审计。</p></div>
+      <div><div class="console-eyebrow">{{ workflowRuntime.engineLabel }}<template v-if="workflowRuntime.tenantId"> · {{ workflowRuntime.tenantId }}</template></div><h1>Camunda 管理台</h1><p>官方 REST 语义的真实查询与受控运维入口；后端代理模式下由认证身份执行租户隔离。</p></div>
       <div class="console-heading-actions"><span class="connection-state" :class="statusClass"><i />{{ statusText }}<b v-if="version">v{{ version.version }}</b></span><ElButton :icon="Refresh" :loading="loading[activeTab]" @click="refreshActiveTab">刷新</ElButton><ElButton type="primary" :icon="Upload" @click="showDeploymentDialog = true">部署 BPMN</ElButton></div>
     </div>
     <ElAlert v-if="error" type="error" :closable="false" show-icon class="console-alert" :title="error" />
@@ -403,7 +437,7 @@ onBeforeUnmount(() => { disposed = true; queries.dispose() })
     <nav class="console-tabs" aria-label="Camunda 管理台模块"><button v-for="tab in tabs" :key="tab.key" type="button" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key; void refreshActiveTab()"><component :is="tab.icon" :size="16" />{{ tab.label }}<span v-if="tab.key === 'operations' && counts.incidents" class="tab-count">{{ counts.incidents ?? '—' }}</span></button></nav>
 
     <div v-if="activeTab === 'overview'" class="console-view">
-      <div class="engine-banner" :class="statusClass"><div><span class="engine-dot" /><b>Camunda · {{ statusText }}</b><span>REST base path · /engine-rest</span></div><small>最近刷新：{{ lastUpdated ? lastUpdated.toLocaleTimeString('zh-CN', { hour12: false }) : '—' }}</small></div>
+      <div class="engine-banner" :class="statusClass"><div><span class="engine-dot" /><b>Camunda · {{ statusText }}</b><span>{{ workflowRuntime.engineLabel }} · /engine-rest</span><span v-if="workflowRuntime.tenantId">租户 · {{ workflowRuntime.tenantId }}</span></div><small>最近刷新：{{ lastUpdated ? lastUpdated.toLocaleTimeString('zh-CN', { hour12: false }) : '—' }}</small></div>
       <div class="console-metrics"><article><span>运行中实例</span><strong>{{ counts.instances ?? '—' }}</strong><small>GET /process-instance/count</small></article><article><span>人工任务</span><strong>{{ counts.tasks ?? '—' }}</strong><small>GET /task/count</small></article><article class="warning"><span>Incident</span><strong>{{ counts.incidents ?? '—' }}</strong><small>GET /incident/count</small></article><article class="warning"><span>失败 Job</span><strong>{{ counts.jobs ?? '—' }}</strong><small>GET /job/count</small></article><article><span>流程定义</span><strong>{{ counts.definitions ?? '—' }}</strong><small>GET /process-definition/count</small></article><article><span>External Task</span><strong>{{ counts.externalTasks ?? '—' }}</strong><small>GET /external-task/count</small></article></div>
       <div class="console-columns"><div class="console-panel"><div class="panel-heading"><div><h2>最近部署</h2><p>来自 Camunda deployment 资源</p></div><ElButton text :icon="Document" @click="activeTab = 'definitions'; void refreshActiveTab()">查看定义</ElButton></div><ElTable :data="deployments" size="small" empty-text="暂无部署记录" table-layout="fixed"><ElTableColumn prop="name" label="部署名称" min-width="180" /><ElTableColumn prop="source" label="来源" min-width="150"><template #default="{ row }">{{ row.source || '—' }}</template></ElTableColumn><ElTableColumn prop="deploymentTime" label="部署时间" min-width="170"><template #default="{ row }">{{ formatDate(row.deploymentTime) }}</template></ElTableColumn></ElTable></div><div class="console-panel"><div class="panel-heading"><div><h2>当前能力</h2><p>已接入官方 REST 资源</p></div><Files :size="18" class="panel-icon" /></div><div class="capability-list"><div><CircleCheckFilled :size="15" />定义、部署与 XML</div><div><CircleCheckFilled :size="15" />实例、活动树与变量</div><div><CircleCheckFilled :size="15" />任务、Job、Incident</div><div><CircleCheckFilled :size="15" />External Task 与历史</div><div><CircleCheckFilled :size="15" />用户操作日志</div></div></div></div>
     </div>

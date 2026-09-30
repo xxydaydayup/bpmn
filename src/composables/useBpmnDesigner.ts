@@ -16,6 +16,7 @@ import LayoutRunner from '@/bpmn/LayoutRunner'
 import LayoutCommand from '@/bpmn/LayoutCommand'
 import type { NodeProperties, NodePropertyField, ValidationIssue } from '@/bpmn/types'
 import { isValidBpmnId, validateWorkflow, type WorkflowProcess } from '@/bpmn/validation'
+import { validateDeploymentProcesses, type DesignerDeploymentSnapshot } from '@/bpmn/deployment'
 import { multiInstancePatch, readMultiInstance } from '@/bpmn/multiInstance'
 import { readServiceTask, serviceTaskPatch } from '@/bpmn/serviceTask'
 import { ensureHistoryTimeToLive } from '@/bpmn/processDefaults'
@@ -50,6 +51,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
   const ready = ref(false)
   const initialized = ref(false)
   const busy = ref(false)
+  let diagramRevision = 0
   const error = ref('')
   const warning = ref('')
   const canUndo = ref(false)
@@ -462,6 +464,24 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     return disposed ? undefined : result.xml
   }
 
+  async function prepareDeployment(): Promise<DesignerDeploymentSnapshot | undefined> {
+    if (!modeler || !ready.value || busy.value || disposed) return
+    busy.value = true
+    try {
+      const revision = diagramRevision
+      const processes = (modeler.getDefinitions()?.rootElements ?? [])
+        .filter((item: ModdleElement) => is(item, 'bpmn:Process'))
+        .map((item: ModdleElement) => ({ id: item.id ?? '', name: item.name ?? '', isExecutable: item.isExecutable === true }))
+      const issues = [...checkWorkflow(), ...validateDeploymentProcesses(processes)]
+      if (warning.value) issues.push({ severity: 'warning', code: 'deployment-import-warning', elementId: '', message: warning.value })
+      const xml = issues.some(issue => issue.severity === 'error') ? '' : (await modeler.saveXML({ format: true })).xml ?? ''
+      if (revision !== diagramRevision) throw new Error('画布在准备期间发生变化，请重新打开部署以获取最新快照。')
+      return disposed ? undefined : { xml, processes, issues }
+    } finally {
+      if (!disposed) busy.value = false
+    }
+  }
+
   function undo() {
     if (!busy.value && canUndo.value) modeler?.get<CommandStack>('commandStack').undo()
   }
@@ -497,6 +517,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
         if (event.element === activeElement) syncSelection()
       })
       modeler.on('commandStack.changed', () => {
+        diagramRevision += 1
         syncHistory()
         syncSelection()
         syncDiagram()
@@ -523,7 +544,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
 
   return {
     ready, initialized, busy, error, warning, selectedNode, canUndo, canRedo,
-    fitViewport, importXML, exportXML, updateProperty, undo, redo,
+    fitViewport, importXML, exportXML, prepareDeployment, updateProperty, undo, redo,
     propertyError, validationIssues, hasValidated, checkWorkflow, locateElement, showProcessProperties,
     processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
     themeSnapshot, setTheme, refreshTheme,

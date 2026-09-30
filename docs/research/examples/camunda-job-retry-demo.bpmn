@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+  id="Definitions_JobRetryDemo" targetNamespace="https://bpmn-workspace.local/examples">
+  <bpmn:process id="Process_JobRetryDemo" name="Job 重试与 Incident 演示" isExecutable="true" camunda:historyTimeToLive="30">
+    <bpmn:startEvent id="Start_JobRetry" name="开始">
+      <bpmn:outgoing>Flow_ToFailingTask</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_FailOnPurpose" name="故意失败的异步任务"
+      camunda:class="com.example.camunda.MissingRetryDemoDelegate" camunda:asyncBefore="true">
+      <bpmn:extensionElements>
+        <camunda:failedJobRetryTimeCycle>R3/PT30S</camunda:failedJobRetryTimeCycle>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToFailingTask</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_JobRetry" name="结束">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_ToFailingTask" sourceRef="Start_JobRetry" targetRef="Task_FailOnPurpose" />
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="Task_FailOnPurpose" targetRef="End_JobRetry" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_JobRetryDemo">
+    <bpmndi:BPMNPlane id="Plane_JobRetryDemo" bpmnElement="Process_JobRetryDemo">
+      <bpmndi:BPMNShape id="Start_JobRetry_di" bpmnElement="Start_JobRetry">
+        <dc:Bounds x="70" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_FailOnPurpose_di" bpmnElement="Task_FailOnPurpose">
+        <dc:Bounds x="190" y="110" width="180" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_JobRetry_di" bpmnElement="End_JobRetry">
+        <dc:Bounds x="450" y="132" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_ToFailingTask_di" bpmnElement="Flow_ToFailingTask">
+        <di:waypoint x="106" y="150" />
+        <di:waypoint x="190" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEnd_di" bpmnElement="Flow_ToEnd">
+        <di:waypoint x="370" y="150" />
+        <di:waypoint x="450" y="150" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

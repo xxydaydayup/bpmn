@@ -15,13 +15,13 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api/camunda': {
-          target: env.CAMUNDA_PROXY_TARGET || 'http://192.168.124.202:8085',
+          target: env.CAMUNDA_PROXY_TARGET,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/camunda/, '/engine-rest'),
           ...(env.CAMUNDA_PROXY_AUTH ? { auth: env.CAMUNDA_PROXY_AUTH } : {}),
         },
         '/api': {
-          target: env.API_PROXY_TARGET || 'http://localhost:8080',
+          target: env.API_PROXY_TARGET,
           changeOrigin: true,
           ...(env.API_PROXY_AUTH ? { auth: env.API_PROXY_AUTH } : {}),
         },

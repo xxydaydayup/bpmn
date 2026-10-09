@@ -3,7 +3,7 @@ import type { ElkNode, ElkPoint } from 'elkjs/lib/elk-api'
 export interface Bounds { x: number; y: number; width: number; height: number }
 export interface LayoutLabel { id: string; text: string; width: number; height: number }
 export interface LayoutNode extends Bounds { id: string; type: string; label?: LayoutLabel }
-export interface LayoutEdge { id: string; source: string; target: string; label?: LayoutLabel }
+export interface LayoutEdge { id: string; source: string; target: string; waypoints?: ElkPoint[]; label?: LayoutLabel }
 export interface LayoutSnapshot { id: string; nodes: LayoutNode[]; edges: LayoutEdge[]; unsupported: string[] }
 export interface LayoutSettings { width: number; height: number; nodeGap: number; layerGap: number; edgeGap: number; padding: number }
 export interface LayoutPlan { shapes: Array<Bounds & { id: string }>; connections: Array<{ id: string; waypoints: ElkPoint[] }> }
@@ -54,6 +54,41 @@ export function createLayoutGraph(snapshot: LayoutSnapshot, settings: LayoutSett
       labels: edge.label ? [{ ...edge.label, layoutOptions: { 'elk.edgeLabels.placement': 'CENTER' } }] : [],
     })),
   }
+}
+
+/**
+ * Normalize undersized task cards without changing the surrounding layout.
+ * The node center stays fixed; only connection endpoints are redocked to the
+ * resized card boundary. ELK is intentionally not involved here.
+ */
+export function createCardResizePlan(snapshot: LayoutSnapshot, settings: Pick<LayoutSettings, 'width' | 'height'>): LayoutPlan {
+  if (!assessLayout(snapshot, settings).supported) return { shapes: [], connections: [] }
+
+  const resized = new Map<string, LayoutNode>()
+  for (const node of snapshot.nodes) {
+    if (!isCardType(node.type) || (node.width >= settings.width && node.height >= settings.height)) continue
+    const width = Math.max(node.width, settings.width)
+    const height = Math.max(node.height, settings.height)
+    resized.set(node.id, {
+      ...node,
+      x: node.x + (node.width - width) / 2,
+      y: node.y + (node.height - height) / 2,
+      width,
+      height,
+    })
+  }
+
+  const shapes = [...resized.values()].map(({ id, x, y, width, height }) => ({ id, x, y, width, height }))
+  const connections = snapshot.edges
+    .filter(edge => resized.has(edge.source) || resized.has(edge.target))
+    .map(edge => {
+      if (!edge.waypoints || edge.waypoints.length < 2) throw new Error(`连线 ${edge.id} 的路由不完整`)
+      return {
+        id: edge.id,
+        waypoints: normalizeCardConnections(edge.waypoints, resized.get(edge.source), resized.get(edge.target)),
+      }
+    })
+  return { shapes, connections }
 }
 
 function finite(value: number | undefined): number {

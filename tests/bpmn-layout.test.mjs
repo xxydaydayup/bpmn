@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import { load, BpmnModdle, descriptor, template } from './bpmn-test-utils.mjs'
 
-const { assessLayout, createLayoutGraph, readLayoutPlan, normalizeCardConnections, cardPortInset } = await load('layout')
+const { assessLayout, createCardResizePlan, createLayoutGraph, readLayoutPlan, normalizeCardConnections, cardPortInset } = await load('layout')
 const { default: LayoutCommand } = await load('LayoutCommand')
 const settings = { width: 184, height: 88, nodeGap: 64, layerGap: 76, edgeGap: 24, padding: 40 }
 const elk = new ELK()
@@ -28,7 +28,7 @@ function diagram(definitions) {
       snapshot.nodes.push({ id: bo.id, type: bo.$type, ...di.bounds, label })
     } else {
       element.waypoints = di.waypoint.map(({ x, y }) => ({ x, y }))
-      snapshot.edges.push({ id: bo.id, source: bo.sourceRef.id, target: bo.targetRef.id, label })
+      snapshot.edges.push({ id: bo.id, source: bo.sourceRef.id, target: bo.targetRef.id, waypoints: element.waypoints, label })
     }
   }
   return { snapshot, registry }
@@ -108,6 +108,35 @@ test('unsupported shapes and incomplete routing are rejected before mutation', a
   const plan = { shapes: [{ ...snapshot.nodes[0], x: 500 }], connections: [{ id: 'missing', waypoints: [] }] }
   assert.throws(() => new LayoutCommand(registry, moddle).execute({ plan }), /已变化/)
   assert.equal((await moddle.toXML(rootElement)).xml, before)
+})
+
+test('import card sizing preserves centers and existing route bends', async () => {
+  const moddle = new BpmnModdle({ camunda: descriptor })
+  const xml = readFileSync(new URL('../src/bpmn/requirement-process.bpmn', import.meta.url), 'utf8')
+  const { rootElement } = await moddle.fromXML(xml)
+  const { snapshot, registry } = diagram(rootElement)
+  const task = snapshot.nodes.find(node => node.type === 'bpmn:UserTask' || node.type === 'bpmn:ServiceTask')
+  assert.ok(task)
+  const beforeCenter = { x: task.x + task.width / 2, y: task.y + task.height / 2 }
+  const beforeBends = snapshot.edges.flatMap(edge => edge.waypoints?.slice(1, -1) ?? [])
+  const plan = createCardResizePlan(snapshot, settings)
+  assert.deepEqual(plan.shapes.find(shape => shape.id === task.id), {
+    id: task.id,
+    x: task.x + (task.width - 184) / 2,
+    y: task.y + (task.height - 88) / 2,
+    width: 184,
+    height: 88,
+  })
+  const resized = plan.shapes.find(shape => shape.id === task.id)
+  assert.equal(resized.x + resized.width / 2, beforeCenter.x)
+  assert.equal(resized.y + resized.height / 2, beforeCenter.y)
+  assert.deepEqual(plan.connections.flatMap(edge => edge.waypoints.slice(1, -1)), beforeBends)
+
+  const command = new LayoutCommand(registry, moddle)
+  command.execute({ plan })
+  const imported = diagram(rootElement).snapshot
+  assert.equal(imported.nodes.find(node => node.id === task.id).width, 184)
+  assert.equal(imported.nodes.find(node => node.id === task.id).height, 88)
 })
 
 test('card ports avoid rounded corners without rewriting oblique connections', () => {

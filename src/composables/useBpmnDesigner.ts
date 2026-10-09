@@ -11,7 +11,7 @@ import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
 import { createDiagramThemeOptions } from '@/bpmn/modules'
 import { createThemeStore, diagramTheme, type ThemeId, type ThemeSnapshot } from '@/bpmn/theme'
 import { presentNode } from '@/bpmn/icons'
-import { assessLayout, createLayoutGraph, readLayoutPlan, supportedLayoutTypes, type LayoutSnapshot } from '@/bpmn/layout'
+import { assessLayout, createCardResizePlan, createLayoutGraph, readLayoutPlan, supportedLayoutTypes, type LayoutSnapshot } from '@/bpmn/layout'
 import LayoutRunner from '@/bpmn/LayoutRunner'
 import LayoutCommand from '@/bpmn/LayoutCommand'
 import type { NodeProperties, NodePropertyField, ValidationIssue } from '@/bpmn/types'
@@ -121,7 +121,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       if (item.parent !== root) unsupported.add('嵌套图形')
       if (is(item, 'bpmn:SequenceFlow')) {
         const edge = item as Connection
-        edges.push({ id: edge.id, source: edge.source?.id ?? '', target: edge.target?.id ?? '', label: readLabel(edge) })
+        edges.push({ id: edge.id, source: edge.source?.id ?? '', target: edge.target?.id ?? '', waypoints: edge.waypoints.map(({ x, y }) => ({ x, y })), label: readLabel(edge) })
       } else if (supportedLayoutTypes.has(item.type)) {
         const node = item as Shape
         if (node.businessObject.eventDefinitions?.length) unsupported.add('带事件定义的事件')
@@ -142,12 +142,11 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     processName.value = modeler.get<Canvas>('canvas').getRootElement()?.businessObject?.name || '未命名流程'
   }
 
-  async function applyLayout(force: boolean): Promise<string> {
+  async function applyLayout(): Promise<string> {
     if (!modeler) return ''
     const snapshot = snapshotLayout()
     const capability = assessLayout(snapshot, layoutSettings)
     if (!capability.supported) return capability.reason
-    if (!force && !capability.needsResize) return ''
     const result = await layoutRunner.run(createLayoutGraph(snapshot, layoutSettings))
     if (disposed || !modeler) return ''
     const plan = readLayoutPlan(result, snapshot)
@@ -156,11 +155,19 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     return ''
   }
 
+  function resizeImportedCards() {
+    if (!modeler) return
+    const snapshot = snapshotLayout()
+    const plan = createCardResizePlan(snapshot, layoutSettings)
+    if (!plan.shapes.length && !plan.connections.length) return
+    modeler.get<CommandStack>('commandStack').execute('diagram.applyLayout', { plan })
+  }
+
   async function arrangeLayout() {
     if (!modeler || !ready.value || busy.value || !canArrange.value) return false
     busy.value = true
     try {
-      const notice = await applyLayout(true)
+      const notice = await applyLayout()
       if (disposed) return false
       if (notice) { warning.value = notice; return false }
       fitViewport()
@@ -347,14 +354,12 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       applyProcessDefaults()
       activeElement = undefined
       layoutStatus.value = ''
-      let layoutWarning = ''
-      try { layoutWarning = await applyLayout(false) }
-      catch (cause) { layoutWarning = `自动整理未完成，已保留导入布局：${cause instanceof Error ? cause.message : '布局不可用'}` }
+      resizeImportedCards()
       if (disposed) return false
       modeler.get<CommandStack>('commandStack').clear()
       ready.value = true
       error.value = ''
-      warning.value = [result.warnings.length ? `文件有 ${result.warnings.length} 项内容未被完整识别，请确认后再导出。` : '', layoutWarning].filter(Boolean).join(' ')
+      warning.value = result.warnings.length ? `文件有 ${result.warnings.length} 项内容未被完整识别，请确认后再导出。` : ''
       fitViewport()
       selectNode()
       syncHistory()

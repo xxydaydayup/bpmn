@@ -53,3 +53,4 @@
 ## 专项文档
 
 - 探索业务术语或架构决策前，读取[领域文档约定](./docs/agents/domain.md)。
+- 创建 Git 提交时，遵循[提交约定](./docs/agents/commit-messages.md)。

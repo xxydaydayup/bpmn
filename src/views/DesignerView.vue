@@ -12,12 +12,21 @@ import { workflowTemplates } from '@/bpmn/templates'
 import { useBpmnDesigner } from '@/composables/useBpmnDesigner'
 import { diagramCSSVariables, themePresets, type ThemeId } from '@/bpmn/theme'
 import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
+import { useRoute } from 'vue-router'
+import { businessWorkflowGateway } from '@/api/workflow'
+import { useCurrentTaskTemplate } from '@/composables/useCurrentTaskTemplate'
 import '@/styles/designer.css'
 import 'bpmn-js/dist/assets/diagram-js.css'
 import 'bpmn-js/dist/assets/bpmn-js.css'
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css'
 
 const container = ref<HTMLDivElement>()
+const route = useRoute()
+const currentTaskKey = computed(() => {
+  const value = route.query.taskKey
+  const key = Array.isArray(value) ? value[0] : value
+  return typeof key === 'string' ? key : undefined
+})
 const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
 const fileInput = ref<HTMLInputElement>()
 const xmlDialogVisible = ref(false)
@@ -37,7 +46,7 @@ const libraryCollapsed = ref(false)
 const propertiesVisible = ref(!window.matchMedia('(max-width: 760px)').matches)
 const {
   ready, initialized, busy, error, warning, selectedNode, canUndo, canRedo,
-  fitViewport, importXML, exportXML, prepareDeployment, updateProperty, undo, redo,
+  fitViewport, importXML, resetInitialDiagram, exportXML, prepareDeployment, updateProperty, undo, redo,
   propertyError, validationIssues, checkWorkflow, locateElement, showProcessProperties,
   processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
   themeSnapshot, setTheme,
@@ -45,6 +54,11 @@ const {
 const xmlDialogBusy = computed(() => busy.value || readingXMLFile.value || applyingXML.value || copyingXML.value)
 const canvasStyle = computed(() => diagramCSSVariables(themeSnapshot.value))
 const themeOptions = Object.values(themePresets)
+const { loading: currentTemplateLoading, error: currentTemplateError } = useCurrentTaskTemplate(
+  currentTaskKey, ready, busy, importXML, businessWorkflowGateway, resetInitialDiagram,
+)
+const templateSourceBlocked = computed(() => Boolean(route.query.taskKey)
+  && (currentTemplateLoading.value || Boolean(currentTemplateError.value)))
 
 function handleThemeChange(event: Event) {
   const id = (event.target as HTMLSelectElement).value as ThemeId
@@ -205,16 +219,17 @@ async function copyXML() {
 
 <template>
   <section class="designer-page" :style="canvasStyle">
+    <ElAlert v-if="currentTemplateError" type="error" :closable="false" show-icon :title="currentTemplateError" />
     <header class="designer-document-header">
-      <div class="designer-document-title"><div class="designer-breadcrumb">工作空间 <span>/</span> 流程设计</div><div class="designer-title-line"><h1>{{ processName }}</h1><span class="designer-draft">本地草稿</span></div></div>
+      <div class="designer-document-title"><div class="designer-breadcrumb">工作空间 <span>/</span> 流程设计</div><div class="designer-title-line"><h1>{{ processName }}</h1><span class="designer-draft">{{ currentTemplateLoading ? '正在载入任务模板' : route.query.taskKey ? `当前模板 · ${route.query.taskKey}` : '本地草稿' }}</span></div></div>
       <div class="designer-document-actions">
         <label class="designer-theme-picker"><span>主题</span><select :value="themeSnapshot.id" aria-label="选择画布主题" :disabled="!initialized || busy" @change="handleThemeChange"><option v-for="theme in themeOptions" :key="theme.id" :value="theme.id">{{ theme.label }}</option></select></label>
         <button class="designer-button" :disabled="!initialized || busy" aria-label="流程模板" title="流程模板" @click="templateError = ''; templateDialogVisible = true"><DiagramIcon name="template" /><span>流程模板</span></button>
         <button class="designer-button" :disabled="!initialized || busy || previewLoading" aria-label="导入 XML" title="导入 XML" @click="openXMLImport"><DiagramIcon name="upload" /><span>导入 XML</span></button>
         <button class="designer-button" :disabled="!ready || busy" aria-label="检查流程" title="检查流程" @click="inspectWorkflow"><DiagramIcon name="check" /><span>流程检查</span></button>
         <button class="designer-button" :disabled="!ready || busy" aria-label="导出 XML" title="导出 XML" @click="exportDiagram"><DiagramIcon name="download" /><span>导出 XML</span></button>
-        <DesignerDeployment :disabled="!ready || xmlDialogBusy || previewLoading || xmlDialogVisible || templateDialogVisible" :prepare="prepareDeployment" @locate="locateElement" />
-        <DesignerTaskTemplate v-if="workflowRuntime.businessEnabled" :disabled="!ready || xmlDialogBusy || previewLoading || xmlDialogVisible || templateDialogVisible" :prepare="prepareDeployment" @locate="locateElement" />
+        <DesignerDeployment :disabled="!ready || templateSourceBlocked || xmlDialogBusy || previewLoading || xmlDialogVisible || templateDialogVisible" :prepare="prepareDeployment" @locate="locateElement" />
+        <DesignerTaskTemplate v-if="workflowRuntime.businessEnabled" :disabled="!ready || templateSourceBlocked || xmlDialogBusy || previewLoading || xmlDialogVisible || templateDialogVisible" :prepare="prepareDeployment" @locate="locateElement" />
       </div>
     </header>
     <div class="designer-surface">

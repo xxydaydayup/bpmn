@@ -469,6 +469,10 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     return disposed ? undefined : result.xml
   }
 
+  function resetInitialDiagram() {
+    return importXML(initialDiagram)
+  }
+
   async function prepareDeployment(): Promise<DesignerDeploymentSnapshot | undefined> {
     if (!modeler || !ready.value || busy.value || disposed) return
     busy.value = true
@@ -549,7 +553,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
 
   return {
     ready, initialized, busy, error, warning, selectedNode, canUndo, canRedo,
-    fitViewport, importXML, exportXML, prepareDeployment, updateProperty, undo, redo,
+    fitViewport, importXML, resetInitialDiagram, exportXML, prepareDeployment, updateProperty, undo, redo,
     propertyError, validationIssues, hasValidated, checkWorkflow, locateElement, showProcessProperties,
     processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
     themeSnapshot, setTheme, refreshTheme,

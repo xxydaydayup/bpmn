@@ -85,14 +85,14 @@ pnpm preview    # 预览构建结果
 
 列表每页 20 条，搜索/重置回到第一页，刷新保留当前页及已提交筛选。新查询会取消旧请求，详情切换和离开页面后不会被旧结果覆盖。变量使用 `deserializeValues=false` 查询，避免展示时依赖 Java 对象类。当前采用手动刷新；持续告警、历史路径高亮、业务审批表单、服务端设计稿管理、完整平台审计尚未实现。
 
-验证记录见 [管理台 REST 验证](./docs/research/camunda-console-verification.md)。开发引擎可用以下命令复查部署/运维生命周期；脚本只操作本次生成的唯一测试部署，结束时级联清理该部署及其测试实例。
+开发引擎可用以下命令复查部署/运维生命周期；脚本只操作本次生成的唯一测试部署，结束时级联清理该部署及其测试实例。
 
 ```powershell
 $env:CAMUNDA_TEST_BASE_URL = 'http://192.168.124.202:8085/engine-rest'
 node scripts/camunda-console-smoke.mjs
 ```
 
-观察同一个 Job 反复失败、剩余重试次数递减以及最终出现 Incident，可使用 [Job 重试与 Incident 演示](./docs/research/camunda-job-retry-demo.md)。该示例会为自动验证创建唯一测试部署并在结束时清理。
+观察同一个 Job 反复失败、剩余重试次数递减以及最终出现 Incident，可运行 `node scripts/camunda-job-retry-demo.mjs`。该示例会为自动验证创建唯一测试部署并在结束时清理。
 
 ## 需求确认流程示例
 
@@ -148,7 +148,7 @@ node scripts/camunda-console-smoke.mjs
 
 旧 `wf:` 扩展与固定名单审批结果协议已退出执行契约。复杂审批模板仅供设计参考，其中设置为 `isExecutable="false"` 的流程不会作为可部署样例；正式审批规则需要业务侧定义变量、结算和路径语义。当前首条联调使用可执行的需求确认或串行模板。
 
-六个模板的逐项可执行性、所需 Camunda REST 子集、缺失业务模块与待确认规则，见 [模板执行与接口范围调研](./docs/research/workflow-templates-camunda7-scope.md)。该文档区分源码事实、服务只读观测与实施建议，不代表六个模板已通过引擎执行验收。
+六个模板是设计样本；当前仅需求确认和串行模板作为可执行联调样本，其余模板仍需业务规则和引擎验证。
 
 ### 流程检查与导出
 
@@ -201,7 +201,7 @@ node scripts/camunda-console-smoke.mjs
 
 `VITE_WORKFLOW_DEVTOOLS=false` 时，侧边栏隐藏且路由拦截引擎联调、流程验证和 Camunda 管理台；普通业务入口只调用 `BusinessWorkflowGateway`。Vite 代理不会进入生产构建，生产环境应由 Go/BFF 承接认证、权限、租户隔离、变量脱敏、幂等和平台审计。
 
-后端代理读写验证记录见 [后端流程接口与 Camunda 代理验证](./docs/research/camunda-backend-proxy-verification.md)。可运行隔离烟测复查透传写操作；测试使用 UUID 名称并在结束时清理自己的 Camunda 部署。
+可运行隔离烟测复查后端代理的透传写操作；测试使用 UUID 名称并在结束时清理自己的 Camunda 部署。
 
 ```powershell
 $env:CAMUNDA_DIRECT_BASE_URL = 'http://192.168.124.202:8085/engine-rest'

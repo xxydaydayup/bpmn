@@ -1,6 +1,6 @@
 # Agent instructions
 
-开始本仓库的任务前，读取并遵循 [Agent.md](./Agent.md)。项目约定以该文件为单一来源。
+开始本仓库的任务前，读取并遵循 [Agent.md](./Agent.md)。它是工程执行规则的唯一入口；当前能力以 README、accepted ADR 和代码/测试为准。
 
 ## Agent skills
 
@@ -15,4 +15,3 @@
 ### Domain docs
 
 探索领域术语或架构决策前，读取 [领域文档约定](docs/agents/domain.md)；采用 single-context 布局。
-

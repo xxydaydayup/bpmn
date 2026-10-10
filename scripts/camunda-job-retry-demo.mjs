@@ -15,7 +15,7 @@ const moddle = new BpmnModdle({ camunda: descriptor })
 const suffix = randomUUID().replaceAll('-', '')
 const deploymentName = 'job_retry_demo_' + suffix
 const processKey = 'Process_JobRetryDemo_' + suffix
-const { rootElement, warnings } = await moddle.fromXML(readFileSync(new URL('../docs/research/examples/camunda-job-retry-demo.bpmn', import.meta.url), 'utf8'))
+const { rootElement, warnings } = await moddle.fromXML(readFileSync(new URL('./fixtures/camunda-job-retry-demo.bpmn', import.meta.url), 'utf8'))
 assert.equal(warnings.length, 0)
 const processDefinition = rootElement.rootElements.find(item => item.$type === 'bpmn:Process')
 assert.ok(processDefinition)

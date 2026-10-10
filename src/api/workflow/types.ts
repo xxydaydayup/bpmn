@@ -31,6 +31,15 @@ export interface TaskTemplate {
   updatedBy?: string
 }
 
+export interface TaskTemplateDetail extends TaskTemplate {
+  bpmnXml: string
+}
+
+export interface TaskTemplateDeleteResult {
+  taskKey: string
+  status: string
+}
+
 export interface TaskTemplateQuery {
   key?: string
   keyLike?: string
@@ -126,11 +135,25 @@ export interface TaskCompletionResult {
   status: string
 }
 
+export interface TaskRefuseResult {
+  taskId: string
+  status: string
+}
+
+export interface TaskReassignResult {
+  taskId: string
+  status: string
+  assignee: string
+}
+
 export interface BusinessWorkflowGateway {
   publishTemplate(xml: string, deploymentName: string): Promise<TaskTemplate>
   listTemplates(query?: TaskTemplateQuery, signal?: AbortSignal): Promise<TaskTemplate[]>
-  getTemplate(taskKey: string, signal?: AbortSignal): Promise<TaskTemplate>
+  getTemplate(taskKey: string, signal?: AbortSignal): Promise<TaskTemplateDetail>
+  deleteTemplate(taskKey: string): Promise<TaskTemplateDeleteResult>
   startTaskInstance(input: StartBusinessTaskInput): Promise<BusinessTaskInstance>
   listTasks(query?: BusinessTaskQuery, signal?: AbortSignal): Promise<BusinessUserTask[]>
   completeTask(taskId: string, variables?: BusinessVariables): Promise<TaskCompletionResult>
+  refuseTask(taskId: string): Promise<TaskRefuseResult>
+  reassignTask(taskId: string, userId: string): Promise<TaskReassignResult>
 }

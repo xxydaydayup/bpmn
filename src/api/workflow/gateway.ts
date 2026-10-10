@@ -8,7 +8,11 @@ import type {
   BusinessWorkflowGateway,
   StartBusinessTaskInput,
   TaskCompletionResult,
+  TaskRefuseResult,
+  TaskReassignResult,
   TaskTemplate,
+  TaskTemplateDeleteResult,
+  TaskTemplateDetail,
   TaskTemplateQuery,
 } from './types'
 
@@ -39,7 +43,12 @@ export function createBusinessWorkflowGateway(send: WorkflowRequester = request)
     },
 
     async getTemplate(taskKey: string, signal?: AbortSignal) {
-      const response = await send<DataResponse<TaskTemplate>>({ method: 'GET', url: basePath + '/task/deployments/' + pathSegment(taskKey), signal })
+      const response = await send<DataResponse<TaskTemplateDetail>>({ method: 'GET', url: basePath + '/task/deployments/' + pathSegment(taskKey), signal })
+      return response.data
+    },
+
+    async deleteTemplate(taskKey: string) {
+      const response = await send<DataResponse<TaskTemplateDeleteResult>>({ method: 'DELETE', url: basePath + '/task/deployments/' + pathSegment(taskKey) })
       return response.data
     },
 
@@ -58,6 +67,23 @@ export function createBusinessWorkflowGateway(send: WorkflowRequester = request)
         method: 'POST',
         url: basePath + '/tasks/' + pathSegment(taskId) + '/complete',
         data: { variables },
+      })
+      return response.data
+    },
+
+    async refuseTask(taskId: string) {
+      const response = await send<DataResponse<TaskRefuseResult>>({
+        method: 'POST',
+        url: basePath + '/tasks/' + pathSegment(taskId) + '/refuse',
+      })
+      return response.data
+    },
+
+    async reassignTask(taskId: string, userId: string) {
+      const response = await send<DataResponse<TaskReassignResult>>({
+        method: 'POST',
+        url: basePath + '/tasks/' + pathSegment(taskId) + '/reassign',
+        data: { userId },
       })
       return response.data
     },

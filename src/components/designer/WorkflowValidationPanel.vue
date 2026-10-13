@@ -30,15 +30,15 @@ const errors = computed(() => props.issues.filter(issue => issue.severity === 'e
 </template>
 
 <style scoped>
-.workflow-validation { padding: 16px 20px; background: #fafcfb; border-bottom: 1px solid #e6ebe8; }
+.workflow-validation { padding: 16px 20px; background: #fafcfb; border-bottom: 1px solid var(--color-border); }
 .validation-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .validation-heading strong { font-size: 13px; }
-.validation-heading p { margin: 7px 0 0; color: #718176; font-size: 11px; line-height: 1.7; }
+.validation-heading p { margin: 7px 0 0; color: var(--color-text-secondary); font-size: 11px; line-height: 1.7; }
 ul { list-style: none; padding: 0; margin: 12px 0 0; max-height: 180px; overflow: auto; }
 .validation-issue { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; width: 100%; padding: 9px 10px; border: 0; border-radius: 4px; background: transparent; color: #455b50; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .validation-issue:hover { background: #edf3ef; }
-.validation-issue.error > span:first-child { color: #b34343; }
-.validation-issue.warning > span:first-child { color: #987025; }
+.validation-issue.error > span:first-child { color: var(--color-danger); }
+.validation-issue.warning > span:first-child { color: var(--color-warning); }
 .validation-issue code { margin-left: auto; color: #819187; overflow-wrap: anywhere; }
 .validation-issue:disabled { cursor: default; }
 </style>

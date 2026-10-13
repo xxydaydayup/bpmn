@@ -73,6 +73,10 @@ const geometry = {
 // 三套预设共用的字体基线；可在单个 preset 的 typography 中覆盖。
 const font = { fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif', fontSize: 14, externalFontSize: 13 }
 
+// 品牌主色：与 src/styles/tokens.css 的 --color-primary（--brand-500）保持一致。
+// 画布渲染依赖 inline style，必须用具体色值，不能引用 CSS 变量。
+const brandPrimary = '#24745e'
+
 function createPreset(
   id: ThemeId,
   label: string,
@@ -95,9 +99,9 @@ function createPreset(
 export const themePresets: Record<ThemeId, DiagramTheme> = {
   // 青雾：当前默认主题，适合常规浅色工作台。
   mist: createPreset('mist', '青雾', {
-    canvas: { background: '#f7f9f8', grid: '#dce5df', accent: '#24745e' },
+    canvas: { background: '#f7f9f8', grid: '#dce5df', accent: brandPrimary },
     renderer: { defaultFillColor: '#ffffff', defaultStrokeColor: '#98aaa1', defaultLabelColor: '#293a34' },
-    colors: { human: '#24745e', humanSoft: '#edf5f1', service: '#526d9e', serviceSoft: '#edf2fa', branch: '#a67a36', branchSoft: '#faf4e8', parallel: '#7d6d9b', parallelSoft: '#f2eef8', secondary: '#687870', end: '#84978b', eventBorder: '#b7cbbf', endIcon: '#788c7e' },
+    colors: { human: brandPrimary, humanSoft: '#edf5f1', service: '#526d9e', serviceSoft: '#edf2fa', branch: '#a67a36', branchSoft: '#faf4e8', parallel: '#7d6d9b', parallelSoft: '#f2eef8', secondary: '#687870', end: '#84978b', eventBorder: '#b7cbbf', endIcon: '#788c7e' },
   }),
   // 石墨：降低绿色倾向，适合偏中性的企业后台界面。
   slate: createPreset('slate', '石墨', {

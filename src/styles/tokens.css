@@ -1,0 +1,73 @@
+/*
+ * Design Tokens —— 全应用静态颜色的单一来源（single source of truth）。
+ *
+ * 使用约定：
+ * 1. 组件与全局样式一律通过语义 token（--color-*）引用，禁止直接书写十六进制色值。
+ * 2. 画布（bpmn-js）的语义色由 src/bpmn/theme.ts 的 themePresets 管理，
+ *    通过 diagramCSSVariables() 注入为 --diagram-* 变量（随主题动态变化），
+ *    不在本文件重复定义。
+ * 3. 修改品牌主色时：同步更新本文件 --brand-500 / --brand-600，
+ *    以及 theme.ts 中 mist 预设的 canvas.accent 与 colors.human。
+ */
+
+:root {
+  /* ========== Primitive：品牌主色色阶 ========== */
+  --brand-50: #e9f1ef;
+  --brand-100: #d3e3df;
+  --brand-200: #bdd5cf;
+  --brand-300: #92baaf;
+  --brand-400: #669e8e;
+  --brand-500: #24745e;   /* 品牌主色 */
+  --brand-600: #1d5d4b;   /* 品牌主色·深 */
+
+  /* ========== Semantic：语义色 ========== */
+  --color-primary: var(--brand-500);
+  --color-primary-strong: var(--brand-600);
+  --color-primary-soft: var(--brand-50);
+
+  /* 文本 */
+  --color-text: #243c36;
+  --color-text-strong: #293a34;
+  --color-text-heading: #18392d;
+  --color-text-secondary: #718176;
+  --color-text-muted: #839087;
+  --color-text-faint: #8b9991;
+  --color-text-ghost: #b9c5bd;
+
+  /* 边框 */
+  --color-border: #e6ebe8;
+  --color-border-strong: #dce5df;
+  --color-border-soft: #edf0ee;
+
+  /* 背景 */
+  --color-bg: #f5f7f6;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f7f9f8;
+  --color-surface-hover: #f5f8f6;
+
+  /* 侧栏（深绿导航） */
+  --color-sidebar-bg: #173c36;
+  --color-sidebar-active: #2c584a;
+  --color-sidebar-hover: #214a40;
+  --color-sidebar-text: #edf4f1;
+  --color-sidebar-text-muted: #c3d4cc;
+  --color-sidebar-caption: #8ca99f;
+  --color-sidebar-accent: #a4d9bb;
+
+  /* 状态色 */
+  --color-danger: #b34343;
+  --color-danger-strong: #993d3d;
+  --color-danger-hover: #b36054;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #f4d3d3;
+  --color-danger-hover-bg: #fbf0ed;
+  --color-warning: #987025;
+  --color-warning-strong: #866827;
+  --color-warning-bg: #fffbef;
+  --color-warning-border: #efe2b8;
+
+  /* 草稿徽章（土黄） */
+  --color-draft-text: #857953;
+  --color-draft-bg: #f7f3e9;
+  --color-draft-border: #ede7d9;
+}

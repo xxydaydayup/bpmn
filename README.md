@@ -51,7 +51,8 @@ pnpm preview    # 预览构建结果
 - Pinia 管理侧边栏状态。
 - Axios 请求封装：基础地址、超时、HTTP 错误处理和类型化响应。
 - `useTable`：查询、重置、刷新、分页、加载状态、错误状态、请求取消和旧结果隔离。
-- 表格示例使用本地静态数据，无需后端即可运行。
+- `DataTable`：基于 Element Plus 的类型化列表格，支持列定义、Vue 单元格插槽、统一空值、金额/日期/标签/链接/字典/Tooltip/状态/枚举渲染；分页与数据请求由页面负责。
+- 表格示例使用本地静态数据，无需后端即可运行；Camunda 管理台流程定义列表复用 `DataTable`，保留页面查询、分页、行操作和详情联动。
 - BPMN 编辑器：默认展示“开始 → 提交需求 → 确认需求 → 结束”，支持绘图、XML 文件或粘贴导入、XML 编辑与复制、导出、当前画布部署和适应画布。
 - 自定义属性面板：编辑 Camunda 办理人/候选用户/候选组/表单、UserTask/ServiceTask 多实例，以及 ServiceTask 的 External/Java 执行方式；也可编辑流程/节点/连线基础字段和排他分支。
 - 六个常用审批模板，以及带元素定位的基础连接、名单和一层并行结构检查；检查错误会阻止文件导出。
@@ -263,5 +264,32 @@ const { rows, loading, error, filters, pagination, search, reset, refresh } = us
 ```
 
 `filters` 是 ref，脚本中使用 `filters.value`，模板中自动解包。筛选值应为普通可克隆数据。`search` 回到第一页后查询，`reset` 恢复初始条件并查询；`refresh` 保留当前页码。组件挂载时默认加载，设置 `immediate: false` 可关闭。
+
+## DataTable
+
+公共表格通过列数组描述普通列，以 `cell-{key}` Vue 插槽处理业务状态、复合内容和操作；分页及查询状态继续由页面维护。
+
+```vue
+<script setup lang="ts">
+import DataTable, { type DataTableColumn } from '@/components/common/DataTable'
+
+const columns = [
+  { key: 'name', prop: 'name', label: '流程名称', minWidth: 180 },
+  { key: 'status', prop: 'status', label: '状态', width: 110 },
+] satisfies DataTableColumn<ProcessRow>[]
+</script>
+
+<template>
+  <DataTable :rows="rows" :columns="columns" :loading="loading" row-key="id">
+    <template #cell-status="{ row }">
+      <ElTag>{{ row.status }}</ElTag>
+    </template>
+  </DataTable>
+</template>
+```
+
+普通单元格的 `null`、`undefined` 和空字符串默认为 `—`；`0`、`false` 会保留。渲染类型用 `kind` 指定，缺少 `options` 时显示空值符号；复杂交互优先使用插槽。异步字典由页面请求并保存为响应式数据，通过 `computed` 列的 `options` 提供给 DataTable；公共组件不发请求。用户列显隐、顺序、固定偏好和配置持久化不在当前范围内。
+
+迁移背景、当前接口与扩展顺序见[表格迁移方案](docs/table-migration-plan.md)。
 
 生产部署使用 `dist`，需要将页面路由回退到 `index.html`，并由服务器代理 `/api` 或配置 `VITE_API_BASE_URL`。Vite 的开发代理不会进入生产构建。

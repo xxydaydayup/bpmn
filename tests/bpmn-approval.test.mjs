@@ -60,14 +60,61 @@ test('Camunda multi-instance collection and element variable are preserved', asy
   const task = rootElement.rootElements[0].flowElements.find(item => item.id === 'Task_MultiReview')
   const loop = task.loopCharacteristics
   assert.equal(loop.$type, 'bpmn:MultiInstanceLoopCharacteristics')
-  assert.equal(loop.get('camunda:collection'), '${reviewers}')
-  assert.equal(loop.get('camunda:elementVariable'), 'reviewer')
-  assert.equal(loop.loopCardinality.body, '3')
+  assert.equal(loop.get('camunda:collection'), '${approverList}')
+  assert.equal(loop.get('camunda:elementVariable'), 'assignee')
+  assert.equal(loop.loopCardinality, undefined)
   const { xml } = await moddle.toXML(rootElement, { format: true })
   const parsed = await moddle.fromXML(xml)
   assert.equal(parsed.warnings.length, 0)
   const parsedTask = parsed.rootElement.rootElements[0].flowElements.find(item => item.id === 'Task_MultiReview')
-  assert.equal(parsedTask.loopCharacteristics.get('camunda:collection'), '${reviewers}')
+  assert.equal(parsedTask.loopCharacteristics.get('camunda:collection'), '${approverList}')
+})
+
+test('countersign resets the count on submission and resubmission after XML round-trip', async () => {
+  const { moddle, rootElement } = await template('countersign-approval')
+  const saved = await moddle.toXML(rootElement, { format: true })
+  const restored = await moddle.fromXML(saved.xml)
+  assert.equal(restored.warnings.length, 0)
+  const process = restored.rootElement.rootElements[0]
+  assert.equal(process.isExecutable, true)
+  const submit = process.flowElements.find(item => item.id === 'Task_ReviewApply')
+  const review = process.flowElements.find(item => item.id === 'Task_MultiReview')
+  const endListeners = activity => {
+    const listeners = activity.extensionElements?.values.filter(item => item.$type === 'camunda:ExecutionListener' && item.event === 'end')
+    assert.ok(listeners?.length, `${activity.id} must retain its end listener`)
+    for (const listener of listeners) assert.match(listener.expression, /^\$\{execution\.setVariable\(/)
+    return listeners.map(listener => listener.expression)
+  }
+  const submitExpressions = endListeners(submit)
+  const reviewExpressions = endListeners(review)
+  assert.deepEqual(submitExpressions, ["${execution.setVariable('agreeCount', 0)}"])
+  assert.deepEqual(reviewExpressions, [
+    "${execution.setVariable('agreeCount', vote == 'agree' ? agreeCount + 1 : agreeCount)}",
+    "${execution.setVariable('totalApproverCount', nrOfInstances)}",
+  ])
+  const variables = new Map([['agreeCount', 11], ['nrOfInstances', 3]])
+  const vote = value => {
+    variables.set('vote', value)
+    variables.set('agreeCount', value === 'agree' ? variables.get('agreeCount') + 1 : variables.get('agreeCount'))
+    variables.set('totalApproverCount', variables.get('nrOfInstances'))
+  }
+
+  variables.set('agreeCount', 0)
+  assert.equal(variables.get('agreeCount'), 0)
+  for (const value of ['agree', 'agree', 'reject']) vote(value)
+  assert.equal(variables.get('agreeCount'), 2)
+  assert.equal(variables.get('totalApproverCount'), 3)
+
+  // Resubmission carries no completion variables: the listener starts a fresh round.
+  variables.set('agreeCount', 0)
+  assert.equal(variables.get('agreeCount'), 0)
+  for (const value of ['agree', 'agree', 'agree']) vote(value)
+  assert.equal(variables.get('agreeCount'), variables.get('totalApproverCount'))
+
+  const gateway = process.flowElements.find(item => item.id === 'Gateway_ReviewResult')
+  assert.equal(gateway.default.id, 'Flow_ReviewReturn')
+  assert.equal(gateway.default.targetRef, submit)
+  assert.equal(process.flowElements.find(item => item.id === 'Flow_ReviewApproved').conditionExpression.body, '${agreeCount == totalApproverCount}')
 })
 
 test('Camunda moddle can create standard external task attributes', async () => {

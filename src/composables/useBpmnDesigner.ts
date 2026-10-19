@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref, shallowRef, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import Modeler from 'bpmn-js/lib/Modeler'
 import type { Element, Label, Shape, Connection, ModdleElement } from 'bpmn-js/lib/model/Types'
 import type CommandStack from 'diagram-js/lib/command/CommandStack'
@@ -7,18 +7,27 @@ import type ElementFactory from 'bpmn-js/lib/features/modeling/ElementFactory'
 import { is } from 'bpmn-js/lib/util/ModelUtil'
 import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json'
 import camundaPlatformBehaviors from 'camunda-bpmn-js-behaviors/lib/camunda-platform'
+import {
+  BpmnPropertiesPanelModule,
+  BpmnPropertiesProviderModule,
+  CamundaPlatformPropertiesProviderModule,
+} from 'bpmn-js-properties-panel'
+import { ElementTemplatesPropertiesProviderModule } from 'bpmn-js-element-templates'
+import ElementTemplateChooserModule from '@bpmn-io/element-template-chooser'
 import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
-import { createDiagramThemeOptions } from '@/bpmn/modules'
+import { createDiagramThemeOptions, createBusinessTemplatePanelModule } from '@/bpmn/modules'
+import approvalElementTemplate from '@/bpmn/approval-element-template.json'
+import { createBusinessTemplatePanelIntegration } from '@/bpmn/propertiesPanelIntegration'
 import { createThemeStore, diagramTheme, type ThemeId, type ThemeSnapshot } from '@/bpmn/theme'
 import { presentNode } from '@/bpmn/icons'
 import { assessLayout, createCardResizePlan, createLayoutGraph, readLayoutPlan, supportedLayoutTypes, type LayoutSnapshot } from '@/bpmn/layout'
 import LayoutRunner from '@/bpmn/LayoutRunner'
 import LayoutCommand from '@/bpmn/LayoutCommand'
-import type { NodeProperties, NodePropertyField, ValidationIssue } from '@/bpmn/types'
-import { isValidBpmnId, validateWorkflow, type WorkflowProcess } from '@/bpmn/validation'
+import type { NodeProperties, ValidationIssue } from '@/bpmn/types'
+import { validateWorkflow, type WorkflowProcess } from '@/bpmn/validation'
 import { validateDeploymentProcesses, type DesignerDeploymentSnapshot } from '@/bpmn/deployment'
-import { multiInstancePatch, readMultiInstance } from '@/bpmn/multiInstance'
-import { readServiceTask, serviceTaskPatch } from '@/bpmn/serviceTask'
+import { readMultiInstance } from '@/bpmn/multiInstance'
+import { readServiceTask } from '@/bpmn/serviceTask'
 import { ensureHistoryTimeToLive } from '@/bpmn/processDefaults'
 
 interface ElementRegistry {
@@ -37,17 +46,20 @@ interface Canvas {
   viewbox(bounds: DiagramBounds): void
 }
 
-const propertyNames: Partial<Record<NodePropertyField, string>> = {
-  name: 'name', assignee: 'camunda:assignee', candidateUsers: 'camunda:candidateUsers',
-  candidateGroups: 'camunda:candidateGroups', formKey: 'camunda:formKey',
-}
-
 interface TextRenderer {
   getDefaultStyle(): Record<string, unknown>
   getExternalStyle(): Record<string, unknown>
 }
 
-export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
+export function useBpmnDesigner(
+  container: Ref<HTMLDivElement | undefined>,
+  panelHosts: {
+    propertiesHost: Ref<HTMLElement | undefined>
+    isAdvanced: () => boolean
+    getVisibility: () => boolean
+    setAdvanced: (value: boolean) => void
+  },
+) {
   const ready = ref(false)
   const initialized = ref(false)
   const busy = ref(false)
@@ -74,6 +86,9 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
   let successfulParses = 0
   const layoutRunner = new LayoutRunner()
   let resizeObserver: ResizeObserver | undefined
+  let panelIntegration: ReturnType<typeof createBusinessTemplatePanelIntegration> | undefined
+  watch(panelHosts.propertiesHost, () => panelIntegration?.refresh())
+  watch(panelHosts.getVisibility, () => panelIntegration?.refresh())
   const unsubscribeTheme = themeStore.subscribe((snapshot) => {
     themeSnapshot.value = snapshot
     refreshTheme()
@@ -399,70 +414,6 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     }
   }
 
-  function updateProperty(field: NodePropertyField, value: string) {
-    if (!modeler || !activeElement || busy.value || !ready.value) return
-    propertyError.value = ''
-    const modeling = modeler.get<{ updateProperties(element: Element, properties: Record<string, unknown>): void }>('modeling')
-    const bo = activeElement.businessObject
-    if (field.startsWith('service')) {
-      if (!is(activeElement, 'bpmn:ServiceTask')) return
-      try { modeling.updateProperties(activeElement, serviceTaskPatch(bo, field, value)) }
-      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '服务任务配置修改失败' }
-      syncSelection()
-      return
-    }
-    if (field.startsWith('multiInstance')) {
-      if (!is(activeElement, 'bpmn:UserTask') && !is(activeElement, 'bpmn:ServiceTask')) return
-      try { modeling.updateProperties(activeElement, multiInstancePatch(modeler.get('moddle'), bo, field, value)) }
-      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '多实例配置修改失败' }
-      syncSelection()
-      return
-    }
-    if (field === 'id') {
-      if (!is(activeElement, 'bpmn:Process')) return
-      const nextId = value.trim()
-      const moddle = modeler.get<{ ids: { assigned(id: string): unknown } }>('moddle')
-      if (!isValidBpmnId(nextId)) {
-        propertyError.value = '流程标识须以字母或下划线开头，后续可包含数字、点和短横线'
-      } else if (nextId !== bo.id && moddle.ids.assigned(nextId)) {
-        propertyError.value = '该标识已被文档中的其他元素使用'
-      } else if (nextId !== bo.id) modeling.updateProperties(activeElement, { id: nextId })
-      syncSelection()
-      return
-    }
-    if (field === 'defaultFlow') {
-      const gateway = is(activeElement, 'bpmn:SequenceFlow') ? activeElement.source : activeElement
-      if (!gateway || !is(gateway, 'bpmn:ExclusiveGateway')) return
-      const flow = value ? modeler.get<ElementRegistry>('elementRegistry').get(value) : undefined
-      if (value && (!flow || flow.source !== gateway || !is(flow, 'bpmn:SequenceFlow'))) return
-      if (gateway.businessObject.default !== flow?.businessObject) modeling.updateProperties(gateway, { default: flow?.businessObject })
-      syncSelection()
-      return
-    }
-    if (field === 'conditionExpression') {
-      if (!is(activeElement, 'bpmn:SequenceFlow') || !is(bo.sourceRef, 'bpmn:ExclusiveGateway')) return
-      if ((bo.conditionExpression?.body ?? '') !== value) {
-        const moddle = modeler.get<{ create(type: string, properties: Record<string, unknown>): ModdleElement }>('moddle')
-        const expression = value.trim() ? moddle.create('bpmn:FormalExpression', {
-          ...(bo.conditionExpression?.$attrs ?? {}), body: value,
-          language: bo.conditionExpression?.language,
-          evaluatesToTypeRef: bo.conditionExpression?.evaluatesToTypeRef,
-        }) : undefined
-        modeling.updateProperties(activeElement, { conditionExpression: expression })
-      }
-      syncSelection()
-      return
-    }
-    if (field !== 'name' && !is(activeElement, 'bpmn:UserTask')) return
-    const property = propertyNames[field]
-    if (!property) return
-    const nextValue = value.trim() || undefined
-    if (activeElement.businessObject.get(property) !== nextValue) {
-      modeling.updateProperties(activeElement, { [property]: nextValue })
-    }
-    syncSelection()
-  }
-
   async function exportXML() {
     if (!modeler || !ready.value || busy.value) return undefined
     const result = await modeler.saveXML({ format: true })
@@ -506,9 +457,26 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       modeler = new Modeler({
         container: container.value,
         moddleExtensions: { camunda: camundaModdleDescriptor },
+        elementTemplates: [approvalElementTemplate],
         ...themeOptions,
-        additionalModules: [ camundaPlatformBehaviors, ...themeOptions.additionalModules ],
+        additionalModules: [
+          BpmnPropertiesPanelModule,
+          BpmnPropertiesProviderModule,
+          CamundaPlatformPropertiesProviderModule,
+          ElementTemplatesPropertiesProviderModule,
+          ElementTemplateChooserModule,
+          createBusinessTemplatePanelModule({ isAdvanced: panelHosts.isAdvanced }),
+          camundaPlatformBehaviors,
+          ...themeOptions.additionalModules,
+        ],
       })
+      panelIntegration = createBusinessTemplatePanelIntegration({
+        getHost: () => panelHosts.propertiesHost.value,
+        getVisibility: panelHosts.getVisibility,
+        isAdvanced: panelHosts.isAdvanced,
+        setAdvanced: panelHosts.setAdvanced,
+      })
+      panelIntegration.mount(modeler)
       modeler.get<CommandStack>('commandStack').registerHandler('diagram.applyLayout', LayoutCommand)
       initialized.value = true
       modeler.on('import.parse.complete', (event: { error?: unknown }) => {
@@ -545,6 +513,8 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     disposed = true
     unsubscribeTheme()
     resizeObserver?.disconnect()
+    panelIntegration?.unmount()
+    panelIntegration = undefined
     layoutRunner.destroy()
     modeler?.destroy()
     modeler = undefined
@@ -553,7 +523,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
 
   return {
     ready, initialized, busy, error, warning, selectedNode, canUndo, canRedo,
-    fitViewport, importXML, resetInitialDiagram, exportXML, prepareDeployment, updateProperty, undo, redo,
+    fitViewport, importXML, resetInitialDiagram, exportXML, prepareDeployment, undo, redo,
     propertyError, validationIssues, hasValidated, checkWorkflow, locateElement, showProcessProperties,
     processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
     themeSnapshot, setTheme, refreshTheme,

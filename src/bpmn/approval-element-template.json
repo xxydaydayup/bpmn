@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/@camunda/element-templates-json-schema@latest/resources/schema.json",
+  "engines": { "camunda": ">=7.0.0" },
+  "name": "人工审批",
+  "id": "com.example.workflow.approval",
+  "version": 1,
+  "description": "为人工任务配置环节名称、办理人和业务表单。办理人可填写 Camunda 用户标识或 UEL 表达式。",
+  "appliesTo": ["bpmn:UserTask"],
+  "entriesVisible": true,
+  "properties": [
+    {
+      "label": "环节名称",
+      "type": "String",
+      "value": "人工审批",
+      "binding": {"type": "property", "name": "name"}
+    },
+    {
+      "label": "办理人",
+      "type": "String",
+      "description": "填写 Camunda 用户标识或 UEL 表达式，例如 ${reviewer}。",
+      "binding": {"type": "property", "name": "camunda:assignee"}
+    },
+    {
+      "label": "业务表单标识",
+      "type": "String",
+      "description": "关联由业务应用实现的表单；该模板不包含表单运行时。",
+      "binding": {"type": "property", "name": "camunda:formKey"}
+    }
+  ]
+}

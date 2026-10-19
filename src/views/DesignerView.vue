@@ -19,6 +19,9 @@ import '@/styles/designer.css'
 import 'bpmn-js/dist/assets/diagram-js.css'
 import 'bpmn-js/dist/assets/bpmn-js.css'
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css'
+import '@bpmn-io/properties-panel/dist/assets/properties-panel.css'
+import 'bpmn-js-element-templates/dist/assets/element-templates.css'
+import '@bpmn-io/element-template-chooser/dist/element-template-chooser.css'
 
 const container = ref<HTMLDivElement>()
 const route = useRoute()
@@ -44,13 +47,20 @@ const selectedTemplateId = ref<string>(workflowTemplates[0].id)
 const templateError = ref('')
 const libraryCollapsed = ref(false)
 const propertiesVisible = ref(!window.matchMedia('(max-width: 760px)').matches)
+const propertiesHost = ref<HTMLElement>()
+const advancedSettingsOpen = ref(false)
 const {
   ready, initialized, busy, error, warning, selectedNode, canUndo, canRedo,
-  fitViewport, importXML, resetInitialDiagram, exportXML, prepareDeployment, updateProperty, undo, redo,
+  fitViewport, importXML, resetInitialDiagram, exportXML, prepareDeployment, undo, redo,
   propertyError, validationIssues, checkWorkflow, locateElement, showProcessProperties,
   processName, diagramCounts, zoomPercent, zoomBy, activateHand, createNode, arrangeLayout, canArrange, layoutReason, layoutStatus,
   themeSnapshot, setTheme,
-} = useBpmnDesigner(container)
+} = useBpmnDesigner(container, {
+  propertiesHost,
+  getVisibility: () => propertiesVisible.value,
+  isAdvanced: () => advancedSettingsOpen.value,
+  setAdvanced: (value) => { advancedSettingsOpen.value = value },
+})
 const xmlDialogBusy = computed(() => busy.value || readingXMLFile.value || applyingXML.value || copyingXML.value)
 const canvasStyle = computed(() => diagramCSSVariables(themeSnapshot.value))
 const themeOptions = Object.values(themePresets)
@@ -256,7 +266,7 @@ async function copyXML() {
           </div>
           <div class="canvas-stage" :aria-busy="busy">
             <div class="canvas-caption"><span></span>{{ processName }}<b>/</b>流程设计</div>
-            <div ref="container" class="bpmn-canvas" aria-label="BPMN 流程编辑器" :inert="busy || !ready"></div>
+  <div ref="container" class="bpmn-canvas" aria-label="BPMN 流程编辑器" :inert="busy || !ready"></div>
             <div v-if="busy" class="canvas-working" role="status">正在处理流程…</div>
             <div class="canvas-bottom-controls">
               <div class="canvas-legend"><span><b class="human-dot"></b>人工任务</span><span><b class="service-dot"></b>服务任务</span><span><b class="branch-dot"></b>分支</span></div>
@@ -269,7 +279,14 @@ async function copyXML() {
           </div>
           <div class="designer-canvas-status"><span>{{ selectedNode?.name || selectedNode?.id || '选择节点或连线' }}</span><span>{{ diagramCounts.nodes }} 个节点 <b>/</b> {{ diagramCounts.flows }} 条连线</span></div>
         </div>
-        <NodePropertiesPanel v-show="propertiesVisible" :node="selectedNode" :disabled="busy || !ready" :error="propertyError" @update="updateProperty" @close="togglePanel('properties')" />
+        <NodePropertiesPanel
+          v-show="propertiesVisible"
+          :node="selectedNode"
+          :disabled="busy || !ready"
+          :error="propertyError"
+          @host="propertiesHost = $event"
+          @close="togglePanel('properties')"
+        />
       </div>
     </div>
     <footer class="designer-footer"><span><b></b>修改未自动保存，离开前请导出或复制 XML。</span><span>{{ layoutStatus || 'BPMN 设计文件' }}</span></footer>

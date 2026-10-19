@@ -5,6 +5,7 @@ import NavigatedViewer from 'bpmn-js/lib/NavigatedViewer'
 import type Canvas from 'diagram-js/lib/core/Canvas'
 import type ElementRegistry from 'diagram-js/lib/core/ElementRegistry'
 import camundaDescriptor from 'camunda-bpmn-moddle/resources/camunda.json'
+import { withCamundaFormFieldWildcard } from '@/bpmn/camundaModdle'
 import 'bpmn-js/dist/assets/diagram-js.css'
 
 const props = withDefaults(defineProps<{ xml: string; activeIds?: string[] }>(), { activeIds: () => [] })
@@ -56,7 +57,7 @@ watch(() => props.xml, render)
 watch(() => props.activeIds, () => { if (!busy.value) highlight() }, { deep: true })
 onMounted(() => {
   if (!host.value) return
-  viewer = new NavigatedViewer({ container: host.value, moddleExtensions: { camunda: camundaDescriptor } })
+  viewer = new NavigatedViewer({ container: host.value, moddleExtensions: { camunda: withCamundaFormFieldWildcard(camundaDescriptor) } })
   observer = new ResizeObserver(() => { if (!disposed && !busy.value) viewer?.get<Canvas>('canvas').resized() })
   observer.observe(host.value)
   render()

@@ -6,6 +6,7 @@ import type EventBus from 'diagram-js/lib/core/EventBus'
 import type ElementFactory from 'bpmn-js/lib/features/modeling/ElementFactory'
 import { is } from 'bpmn-js/lib/util/ModelUtil'
 import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json'
+import { withCamundaFormFieldWildcard } from '@/bpmn/camundaModdle'
 import camundaPlatformBehaviors from 'camunda-bpmn-js-behaviors/lib/camunda-platform'
 import initialDiagram from '@/bpmn/requirement-process.bpmn?raw'
 import { createDiagramThemeOptions } from '@/bpmn/modules'
@@ -20,6 +21,10 @@ import { validateDeploymentProcesses, type DesignerDeploymentSnapshot } from '@/
 import { multiInstancePatch, readMultiInstance } from '@/bpmn/multiInstance'
 import { readServiceTask, serviceTaskPatch } from '@/bpmn/serviceTask'
 import { ensureHistoryTimeToLive } from '@/bpmn/processDefaults'
+import { readUnsupportedConfiguration } from '@/bpmn/unsupportedConfiguration'
+import { createCamundaListener, createListenerField, listenerFieldPatch, listenerImplementationPatch, readCamundaListeners, validateCamundaListener } from '@/bpmn/camundaListeners'
+import { readRuntimeAttributes, runtimeAttributePatch, retryCyclePatch, multiInstanceRetryCyclePatch, readUserTaskRuntime, userTaskRuntimePatch } from '@/bpmn/camundaRuntime'
+import { camundaFormPatch, readCamundaForm } from '@/bpmn/camundaForms'
 
 interface ElementRegistry {
   get(id: string): Element | undefined
@@ -243,7 +248,35 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
             condition: item.conditionExpression?.body,
           })),
       }))
-    validationIssues.value = validateWorkflow(processes)
+    const listenerIssues: ValidationIssue[] = []
+    for (const process of definitions?.rootElements ?? []) {
+      if (!is(process, 'bpmn:Process')) continue
+      const targets = [process, ...(process.flowElements ?? []).filter((item: ModdleElement) =>
+        is(item, 'bpmn:FlowNode') || is(item, 'bpmn:SequenceFlow'))]
+      for (const target of targets) {
+        for (const kind of ['execution', ...(is(target, 'bpmn:UserTask') ? ['task'] : [])] as Array<'execution' | 'task'>) {
+          for (const listener of readCamundaListeners(target, kind)) {
+            for (const message of validateCamundaListener(listener)) {
+              listenerIssues.push({
+                code: 'invalid-camunda-listener', severity: 'error', elementId: target.id ?? '',
+                message: `${kind === 'execution' ? '执行' : '任务'}监听器 ${listener.index + 1}：${message}`,
+              })
+            }
+          }
+        }
+      }
+    }
+    const formIssues: ValidationIssue[] = []
+    for (const process of definitions?.rootElements ?? []) {
+      if (!is(process, 'bpmn:Process')) continue
+      for (const target of process.flowElements ?? []) {
+        if (!is(target, 'bpmn:UserTask') && !is(target, 'bpmn:StartEvent')) continue
+        for (const message of readCamundaForm(target).validation) {
+          formIssues.push({ code: 'invalid-camunda-form', severity: 'error', elementId: target.id ?? '', message })
+        }
+      }
+    }
+    validationIssues.value = [...validateWorkflow(processes), ...listenerIssues, ...formIssues]
     hasValidated.value = true
     return validationIssues.value
   }
@@ -276,6 +309,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     const businessObject = activeElement.businessObject
     const flow = is(activeElement, 'bpmn:SequenceFlow')
     const gateway = flow ? businessObject.sourceRef : businessObject
+    const runtimeAttributes = readRuntimeAttributes(businessObject)
     const readString = (key: string): string => {
       const value: unknown = businessObject.get(key)
       return typeof value === 'string' ? value : ''
@@ -289,9 +323,23 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       candidateUsers: readString('camunda:candidateUsers'),
       candidateGroups: readString('camunda:candidateGroups'),
       formKey: readString('camunda:formKey'),
+      camundaForm: readCamundaForm(businessObject),
+      supportsCamundaForm: is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:StartEvent'),
       isUserTask: is(activeElement, 'bpmn:UserTask'),
       supportsMultiInstance: is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:ServiceTask'),
       multiInstance: readMultiInstance(businessObject),
+      asyncBefore: runtimeAttributes.asyncBefore,
+      asyncAfter: runtimeAttributes.asyncAfter,
+      exclusive: runtimeAttributes.exclusive,
+      jobPriority: runtimeAttributes.jobPriority,
+      failedJobRetryTimeCycle: runtimeAttributes.failedJobRetryTimeCycle,
+      multiInstanceRuntime: is(businessObject.loopCharacteristics, 'bpmn:MultiInstanceLoopCharacteristics')
+        ? readRuntimeAttributes(businessObject.loopCharacteristics)
+        : { asyncBefore: false, asyncAfter: false, exclusive: true, jobPriority: '', failedJobRetryTimeCycle: '' },
+      processHistoryTimeToLive: String(businessObject.get('camunda:historyTimeToLive') ?? ''),
+      processVersionTag: String(businessObject.get('camunda:versionTag') ?? ''),
+      isExecutable: businessObject.isExecutable === true,
+      userTaskRuntime: is(activeElement, 'bpmn:UserTask') ? readUserTaskRuntime(businessObject) : { owner: '', candidateUsers: '', candidateGroups: '', dueDate: '', followUpDate: '', priority: '', description: '' },
       supportsServiceConfiguration: is(activeElement, 'bpmn:ServiceTask'),
       serviceTask: readServiceTask(businessObject),
       supportsConditions: !!gateway && is(gateway, 'bpmn:ExclusiveGateway'),
@@ -302,6 +350,23 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       outgoingFlows: !flow && is(businessObject, 'bpmn:ExclusiveGateway')
         ? (businessObject.outgoing ?? []).map((item: ModdleElement) => ({ id: item.id, label: item.name || item.targetRef?.name || item.id }))
         : [],
+      unsupportedConfiguration: flow ? [] : readUnsupportedConfiguration(
+        businessObject,
+        [
+      ...(is(activeElement, 'bpmn:Process') ? ['isExecutable', 'historyTimeToLive', 'versionTag', 'jobPriority'] : []),
+          ...(!flow && is(activeElement, 'bpmn:FlowNode') ? ['asyncBefore', 'asyncAfter', 'exclusive', 'jobPriority'] : []),
+        ...(is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:StartEvent') ? ['formKey', 'formRef', 'formRefBinding', 'formRefVersion', 'businessKey'] : []),
+        ...(is(activeElement, 'bpmn:UserTask') ? ['assignee', 'candidateUsers', 'candidateGroups', 'owner', 'dueDate', 'followUpDate', 'priority'] : []),
+          ...(is(activeElement, 'bpmn:ServiceTask') ? ['type', 'topic', 'class', 'delegateExpression', 'expression', 'resultVariable'] : []),
+        ],
+        ['camunda:ExecutionListener', 'camunda:FailedJobRetryTimeCycle', ...(is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:StartEvent') ? ['camunda:FormData'] : []), ...(is(activeElement, 'bpmn:UserTask') ? ['camunda:TaskListener'] : [])],
+        is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:ServiceTask') ? ['collection', 'elementVariable', 'asyncBefore', 'asyncAfter', 'exclusive', 'jobPriority'] : [],
+        ['completionCondition'],
+        ['behavior', 'oneBehaviorEventRef', 'noneBehaviorEventRef'],
+        ['camunda:FailedJobRetryTimeCycle'],
+      ),
+      executionListeners: readCamundaListeners(businessObject, 'execution'),
+      taskListeners: !flow && is(activeElement, 'bpmn:UserTask') ? readCamundaListeners(businessObject, 'task') : [],
     }
   }
 
@@ -402,8 +467,30 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
   function updateProperty(field: NodePropertyField, value: string) {
     if (!modeler || !activeElement || busy.value || !ready.value) return
     propertyError.value = ''
-    const modeling = modeler.get<{ updateProperties(element: Element, properties: Record<string, unknown>): void }>('modeling')
+    const modeling = modeler.get<{
+      updateProperties(element: Element, properties: Record<string, unknown>): void
+      updateModdleProperties(element: Element, moddleElement: ModdleElement, properties: Record<string, unknown>): void
+    }>('modeling')
     const bo = activeElement.businessObject
+    if (field.startsWith('executionListener') || field.startsWith('taskListener')) {
+      updateCamundaListener(field, value, modeling)
+      return
+    }
+    if (field.startsWith('multiInstance') && ['multiInstanceAsyncBefore', 'multiInstanceAsyncAfter', 'multiInstanceExclusive', 'multiInstanceJobPriority', 'multiInstanceFailedJobRetryTimeCycle'].includes(field)) {
+      const loop = bo.loopCharacteristics as ModdleElement | undefined
+      if (loop?.$type !== 'bpmn:MultiInstanceLoopCharacteristics') return
+      try {
+        const patch = field === 'multiInstanceFailedJobRetryTimeCycle'
+          ? multiInstanceRetryCyclePatch(modeler.get('moddle'), bo, value)
+          : runtimeAttributePatch(field === 'multiInstanceAsyncBefore' ? 'asyncBefore'
+            : field === 'multiInstanceAsyncAfter' ? 'asyncAfter'
+              : field === 'multiInstanceExclusive' ? 'exclusive' : 'jobPriority', value)
+        if (field === 'multiInstanceFailedJobRetryTimeCycle') modeling.updateProperties(activeElement, patch)
+        else modeling.updateModdleProperties(activeElement, loop, patch)
+      } catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '多实例作业配置修改失败' }
+      syncSelection()
+      return
+    }
     if (field.startsWith('service')) {
       if (!is(activeElement, 'bpmn:ServiceTask')) return
       try { modeling.updateProperties(activeElement, serviceTaskPatch(bo, field, value)) }
@@ -415,6 +502,52 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       if (!is(activeElement, 'bpmn:UserTask') && !is(activeElement, 'bpmn:ServiceTask')) return
       try { modeling.updateProperties(activeElement, multiInstancePatch(modeler.get('moddle'), bo, field, value)) }
       catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '多实例配置修改失败' }
+      syncSelection()
+      return
+    }
+    if (field === 'jobPriority' && is(activeElement, 'bpmn:Process')) {
+      try { modeling.updateProperties(activeElement, runtimeAttributePatch(field, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : 'Camunda 流程属性修改失败' }
+      syncSelection()
+      return
+    }
+    if (['asyncBefore', 'asyncAfter', 'exclusive', 'jobPriority'].includes(field)) {
+      if (!is(activeElement, 'bpmn:FlowNode')) return
+      try { modeling.updateProperties(activeElement, runtimeAttributePatch(field, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : 'Camunda 运行属性修改失败' }
+      syncSelection()
+      return
+    }
+    if (field === 'failedJobRetryTimeCycle') {
+      if (!is(activeElement, 'bpmn:FlowNode')) return
+      try { modeling.updateProperties(activeElement, retryCyclePatch(modeler.get('moddle'), bo, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '失败重试周期修改失败' }
+      syncSelection()
+      return
+    }
+    if (field.startsWith('form') && (is(activeElement, 'bpmn:UserTask') || is(activeElement, 'bpmn:StartEvent'))) {
+      try { modeling.updateProperties(activeElement, camundaFormPatch(modeler.get('moddle'), bo, field, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : 'Camunda 表单配置修改失败' }
+      syncSelection()
+      return
+    }
+    if (field === 'processHistoryTimeToLive' || field === 'processVersionTag') {
+      if (!is(activeElement, 'bpmn:Process')) return
+      const property = field === 'processHistoryTimeToLive' ? 'camunda:historyTimeToLive' : 'camunda:versionTag'
+      modeling.updateProperties(activeElement, { [property]: value.trim() || undefined })
+      syncSelection()
+      return
+    }
+    if (field === 'processIsExecutable') {
+      if (!is(activeElement, 'bpmn:Process')) return
+      modeling.updateProperties(activeElement, { isExecutable: value === 'true' })
+      syncSelection()
+      return
+    }
+    if (field.startsWith('task')) {
+      if (!is(activeElement, 'bpmn:UserTask')) return
+      try { modeling.updateProperties(activeElement, userTaskRuntimePatch(field, value)) }
+      catch (cause) { propertyError.value = cause instanceof Error ? cause.message : '人工任务运行属性修改失败' }
       syncSelection()
       return
     }
@@ -463,6 +596,125 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
     syncSelection()
   }
 
+  function updateCamundaListener(
+    field: NodePropertyField,
+    value: string,
+    modeling: {
+      updateProperties(element: Element, properties: Record<string, unknown>): void
+      updateModdleProperties(element: Element, moddleElement: ModdleElement, properties: Record<string, unknown>): void
+    },
+  ) {
+    if (!modeler || !activeElement) return
+    const kind = field.startsWith('executionListener') ? 'execution' : 'task'
+    if (kind === 'task' && !is(activeElement, 'bpmn:UserTask')) return
+    const prefix = kind === 'execution' ? 'executionListener' : 'taskListener'
+    const property = field.slice(prefix.length)
+    const actionMatch = property.match(/^([A-Za-z]+)(?::(\d+))?(?::(\d+))?(?::(name|type|value))?$/)
+    const action = actionMatch?.[1] ?? ''
+    const index = Number(actionMatch?.[2] ?? -1)
+    const fieldIndex = Number(actionMatch?.[3] ?? -1)
+    const fieldProperty = actionMatch?.[4] ?? ''
+    const type = kind === 'execution' ? 'camunda:ExecutionListener' : 'camunda:TaskListener'
+    const moddle = modeler.get<{ create(type: string, properties?: Record<string, unknown>): ModdleElement }>('moddle')
+    const listenerList = () => (activeElement!.businessObject.extensionElements?.values ?? []) as ModdleElement[]
+    const matchingListeners = () => listenerList().filter(item => item.$type === type)
+    const extensionElements = activeElement.businessObject.extensionElements as ModdleElement | undefined
+    if (action === 'Add') {
+      const listener = createCamundaListener(moddle, kind)
+      if (extensionElements) {
+        listener.$parent = extensionElements
+        modeling.updateModdleProperties(activeElement, extensionElements, { values: [...extensionElements.values, listener] })
+      }
+      else {
+        const extensions = moddle.create('bpmn:ExtensionElements', { values: [listener] })
+        listener.$parent = extensions
+        extensions.$parent = activeElement.businessObject
+        modeling.updateProperties(activeElement, { extensionElements: extensions })
+      }
+      propertyError.value = '请填写监听器事件及执行方式后再部署'
+      syncSelection()
+      return
+    }
+    const listener = matchingListeners()[index]
+    if (!listener) return
+    if (action === 'FieldAdd') {
+      const newField = createListenerField(moddle, { name: '', type: 'string', value: '' })
+      newField.$parent = listener
+      modeling.updateModdleProperties(activeElement, listener, { fields: [...(listener.fields ?? []), newField] })
+      propertyError.value = `Field ${listener.fields.length + 1} 缺少名称`
+      syncSelection()
+      return
+    }
+    if (action === 'FieldRemove') {
+      const fields = (listener.fields ?? []).filter((_: ModdleElement, currentIndex: number) => currentIndex !== fieldIndex)
+      modeling.updateModdleProperties(activeElement, listener, { fields })
+      syncSelection()
+      return
+    }
+    if (action === 'FieldUpdate') {
+      const targetField = (listener.fields ?? [])[fieldIndex] as ModdleElement | undefined
+      if (!targetField) return
+      const current = readCamundaListeners(activeElement.businessObject, kind)[index]!.fields[fieldIndex]!
+      const next = { ...current, ...(fieldProperty === 'name' ? { name: value } : fieldProperty === 'type' ? { type: value as typeof current.type } : { value }) }
+      modeling.updateModdleProperties(activeElement, targetField, listenerFieldPatch(targetField, next))
+      syncSelection()
+      return
+    }
+    if (action === 'MoveUp' || action === 'MoveDown') {
+      const matching = matchingListeners()
+      const targetIndex = index + (action === 'MoveUp' ? -1 : 1)
+      if (targetIndex < 0 || targetIndex >= matching.length || !extensionElements) return
+      const values = [...extensionElements.values]
+      const currentPosition = values.indexOf(listener)
+      const targetPosition = values.indexOf(matching[targetIndex]!)
+      values[currentPosition] = matching[targetIndex]!
+      values[targetPosition] = listener
+      modeling.updateModdleProperties(activeElement, extensionElements, { values })
+      syncSelection()
+      return
+    }
+    if (action === 'Remove') {
+      const values = listenerList().filter(item => item !== listener)
+      if (extensionElements) modeling.updateModdleProperties(activeElement, extensionElements, { values })
+      syncSelection()
+      return
+    }
+    if (action === 'Implementation') {
+      const snapshot = readCamundaListeners(activeElement.businessObject, kind)[index]!
+      const implementationPatch = listenerImplementationPatch(listener, value as typeof snapshot.implementation, type => moddle.create(type))
+      if (implementationPatch.script) (implementationPatch.script as ModdleElement).$parent = listener
+      modeling.updateModdleProperties(activeElement, listener, implementationPatch)
+      const nextSnapshot = readCamundaListeners(activeElement.businessObject, kind)[index]!
+      propertyError.value = validateCamundaListener(nextSnapshot)[0] ?? ''
+      syncSelection()
+      return
+    }
+    const snapshot = readCamundaListeners(activeElement.businessObject, kind)[index]!
+    if (action === 'Event') {
+      const next = { ...snapshot, event: value }
+      propertyError.value = validateCamundaListener(next)[0] ?? ''
+      modeling.updateModdleProperties(activeElement, listener, { event: value })
+    }
+    else if (action === 'Expression') modeling.updateModdleProperties(activeElement, listener, { expression: value })
+    else if (action === 'ClassName') modeling.updateModdleProperties(activeElement, listener, { class: value })
+    else if (action === 'DelegateExpression') modeling.updateModdleProperties(activeElement, listener, { delegateExpression: value })
+    else if (action === 'ScriptFormat' || action === 'ScriptResource' || action === 'ScriptBody') {
+      const script = listener.script as ModdleElement | undefined
+      if (!script) {
+        const propertyName = action === 'ScriptFormat' ? 'scriptFormat' : action === 'ScriptResource' ? 'resource' : 'value'
+        const newScript = moddle.create('camunda:Script', { [propertyName]: value })
+        newScript.$parent = listener
+        modeling.updateModdleProperties(activeElement, listener, { script: newScript })
+      } else {
+        const propertyName = action === 'ScriptFormat' ? 'scriptFormat' : action === 'ScriptResource' ? 'resource' : 'value'
+        modeling.updateModdleProperties(activeElement, script, { [propertyName]: value })
+      }
+    }
+    const errors = validateCamundaListener(readCamundaListeners(activeElement.businessObject, kind)[index] ?? snapshot)
+    propertyError.value = errors[0] ?? ''
+    syncSelection()
+  }
+
   async function exportXML() {
     if (!modeler || !ready.value || busy.value) return undefined
     const result = await modeler.saveXML({ format: true })
@@ -505,7 +757,7 @@ export function useBpmnDesigner(container: Ref<HTMLDivElement | undefined>) {
       const themeOptions = createDiagramThemeOptions()
       modeler = new Modeler({
         container: container.value,
-        moddleExtensions: { camunda: camundaModdleDescriptor },
+        moddleExtensions: { camunda: withCamundaFormFieldWildcard(camundaModdleDescriptor) },
         ...themeOptions,
         additionalModules: [ camundaPlatformBehaviors, ...themeOptions.additionalModules ],
       })

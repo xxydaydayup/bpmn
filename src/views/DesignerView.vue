@@ -89,6 +89,11 @@ function openXMLImport() {
   xmlDialogVisible.value = true
 }
 
+function openXMLEditFromProperties() {
+  if (!initialized.value || xmlDialogBusy.value || previewLoading.value) return
+  void previewDiagram()
+}
+
 async function readXMLFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -269,7 +274,7 @@ async function copyXML() {
           </div>
           <div class="designer-canvas-status"><span>{{ selectedNode?.name || selectedNode?.id || '选择节点或连线' }}</span><span>{{ diagramCounts.nodes }} 个节点 <b>/</b> {{ diagramCounts.flows }} 条连线</span></div>
         </div>
-        <NodePropertiesPanel v-show="propertiesVisible" :node="selectedNode" :disabled="busy || !ready" :error="propertyError" @update="updateProperty" @close="togglePanel('properties')" />
+      <NodePropertiesPanel v-show="propertiesVisible" :node="selectedNode" :disabled="busy || !ready" :error="propertyError" @update="updateProperty" @close="togglePanel('properties')" @edit-xml="openXMLEditFromProperties" />
       </div>
     </div>
     <footer class="designer-footer"><span><b></b>修改未自动保存，离开前请导出或复制 XML。</span><span>{{ layoutStatus || 'BPMN 设计文件' }}</span></footer>

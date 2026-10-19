@@ -54,7 +54,7 @@ pnpm preview    # 预览构建结果
 - `DataTable`：基于 Element Plus 的类型化列表格，支持列定义、Vue 单元格插槽、统一空值、金额/日期/标签/链接/字典/Tooltip/状态/枚举渲染；分页与数据请求由页面负责。
 - 表格示例使用本地静态数据，无需后端即可运行；Camunda 管理台流程定义列表复用 `DataTable`，保留页面查询、分页、行操作和详情联动。
 - BPMN 编辑器：默认展示“开始 → 提交需求 → 确认需求 → 结束”，支持绘图、XML 文件或粘贴导入、XML 编辑与复制、导出、当前画布部署和适应画布。
-- 自定义属性面板：编辑 Camunda 办理人/候选用户/候选组/表单、UserTask/ServiceTask 多实例，以及 ServiceTask 的 External/Java 执行方式；也可编辑流程/节点/连线基础字段和排他分支。
+- 官方 BPMN/Camunda 属性面板：编辑流程、节点和连线字段；支持 Camunda 办理人/候选用户/候选组/表单、多实例及服务任务执行配置。人工任务可应用“人工审批”Element Template，以业务字段为主并折叠显示高级设置。
 - 六个常用审批模板，以及带元素定位的基础连接、名单和一层并行结构检查；检查错误会阻止文件导出。
 - Camunda 7 引擎联调页：通过 Vite 开发代理部署 BPMN、查询流程定义、启动实例、查询/领取/完成人工任务和查看活动树。
 - Camunda REST 管理台：`/camunda-console` 提供运行总览、部署与定义查询、定义/实例挂起恢复、实例终止、活动树与变量查看、任务与 External Task 查询、Job/Incident 异常查看、历史查询、JSON 导出和 Camunda 用户操作日志；页面直接调用官方 REST，仅用于开发联调。
@@ -112,7 +112,7 @@ node scripts/camunda-console-smoke.mjs
 - 初始完整流程与布局：`src/bpmn/requirement-process.bpmn`。
 - XML 导出后再导入，可以继续编辑以上属性与布局。导入无效 XML 会尝试保留原流程；解析阶段失败也保留撤销历史。
 
-属性修改通过 `modeling.updateProperties` 进入 bpmn-js 命令栈。`useBpmnDesigner` 管理模型生命周期、选择同步和 XML 操作，Vue 属性面板只接收普通数据快照，避免把 bpmn-js 模型变成响应式代理。
+属性修改通过 bpmn-js 建模命令进入命令栈。`useBpmnDesigner` 管理模型生命周期、选择同步和 XML 操作；Vue 负责设计器外壳与摘要展示，右侧承载官方 BPMN/Camunda 属性面板。元素模板为人工审批节点提供业务字段，高级设置可展开原生属性组。bpmn-js 模型保持在设计器内，不转换成 Vue 响应式数据。
 
 点击“编辑 XML”会在弹窗中载入当前画布的格式化 XML，可直接修改或粘贴替换文本。“复制 XML”复制的是弹窗内的当前草稿，“应用到画布”才会将草稿导入设计器；取消不改变画布。每次重新打开编辑弹窗都会从画布生成 XML。
 
@@ -168,7 +168,7 @@ node scripts/camunda-console-smoke.mjs
 
 ### 当前属性与 Camunda 支持范围
 
-当前使用标准 BPMN 2.0 和 Camunda 7 `camunda:` 扩展；已安装 `camunda-bpmn-moddle` 和 `camunda-bpmn-js-behaviors`。右侧面板为自定义 Vue 面板，不使用 `bpmn-js-properties-panel`；当前可配置字段如下。
+当前使用标准 BPMN 2.0 和 Camunda 7 `camunda:` 扩展；已安装 `camunda-bpmn-moddle`、`camunda-bpmn-js-behaviors` 和官方 `bpmn-js-properties-panel`。属性面板提供 BPMN/Camunda 技术属性，Element Templates 中首个随应用发布的“人工审批”模板用于编辑环节名称、办理人标识或 UEL 表达式、业务表单标识；应用模板后可展开“高级设置”访问通用属性。办理人暂时手工录入，选人接口留待业务人员目录接入后扩展。
 
 | 属性面板字段 | XML 属性 | 适用范围 |
 | --- | --- | --- |

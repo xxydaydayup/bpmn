@@ -14,7 +14,7 @@
 | 替换 Tabler 图标 | `src/bpmn/icons.ts` 的 SVG 导入与 `diagramIcons` |
 | 节点库分组与名称 | 同文件 → `nodePresentation`、`libraryGroups` |
 | 工具栏、工作区布局和响应式断点 | `src/styles/designer.css` |
-| 属性面板的分组、表单控件 | `src/components/designer/NodePropertiesPanel.vue` |
+| 官方属性面板主题映射与布局 | `src/bpmn/theme.ts`、`src/styles/designer.css`；provider 分组适配见 `src/bpmn/propertiesPanelIntegration.ts` |
 | 新的节点绘制方式 | `src/bpmn/BusinessRenderer.ts` |
 | 快捷操作的图标、中文名称 | `src/bpmn/BusinessContextPad.ts` |
 

@@ -70,4 +70,8 @@ moddle 定义“字段和类型”
 behaviors 维护“编辑时的联动规则”
 ```
 
-当前右侧面板是自定义 Vue 面板，不依赖 `bpmn-js-properties-panel`。面板新增或修改 Camunda 字段时，应同时检查 moddle 描述、行为联动、XML 导出再导入，以及后端实际支持范围。
+右侧面板使用官方 `bpmn-js-properties-panel` 及 Camunda Platform properties provider；业务流程节点可通过 Element Templates provider 选择版本化业务模板。首个“人工审批”模板编辑环节名称、Camunda 办理人和表单引用，模板 ID/版本也写入 Camunda moddle 扩展属性以供 XML 往返恢复。模板应用后的 BPMN/Camunda 通用字段可在折叠的“高级设置”中编辑。
+
+当前节点库仍由 Vue 提供，模板选择器由官方 `@bpmn-io/element-template-chooser` 提供，模型仍由 `useBpmnDesigner` 持有。属性修改、模板应用和模板字段编辑均进入 bpmn-js 命令栈；未来如接入组织架构服务，可在业务模板字段处扩展选人控件。目前办理人仅录入 Camunda 用户标识或 UEL/JUEL 原文，不在浏览器解析或执行。
+
+官方属性面板 CSS 通过 `src/bpmn/theme.ts` 的 `--bio-*` token 接到设计器强调色、边框和表面颜色，并由 `src/styles/designer.css` 调整局部字体、分组密度和悬停状态。官方 provider 负责 BPMN/Camunda 字段，项目适配层只做中文标签、业务字段分组及高级设置折叠；新增模板时检查应用后字段、版本属性和 XML 导出再导入。

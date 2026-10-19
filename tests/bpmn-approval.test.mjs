@@ -55,6 +55,38 @@ test('Camunda 7 assignments round-trip without the experimental wf namespace', a
   assert.equal(restoredTask.get('camunda:candidateUsers'), 'alice,bob')
 })
 
+test('the business approval template binds Camunda 7 fields and its template ID survives XML round-trip', async () => {
+  const approvalTemplate = JSON.parse(readFileSync('src/bpmn/approval-element-template.json', 'utf8'))
+  assert.equal(approvalTemplate.name, '人工审批')
+  assert.equal(approvalTemplate.version, 1)
+  assert.deepEqual(approvalTemplate.appliesTo, ['bpmn:UserTask'])
+  assert.deepEqual(approvalTemplate.properties.map(property => property.binding), [
+    { type: 'property', name: 'name' },
+    { type: 'property', name: 'camunda:assignee' },
+    { type: 'property', name: 'camunda:formKey' },
+  ])
+
+  const { moddle, rootElement } = await template('serial-approval')
+  const task = rootElement.rootElements[0].flowElements.find(item => item.id === 'Task_Manager')
+  task.set('name', '费用审批')
+  task.set('camunda:assignee', '${reviewer}')
+  task.set('camunda:formKey', 'expense-review')
+  task.set('camunda:modelerTemplate', approvalTemplate.id)
+  task.set('camunda:modelerTemplateVersion', approvalTemplate.version)
+
+  const { xml } = await moddle.toXML(rootElement, { format: true })
+  assert.match(xml, /camunda:modelerTemplate="com\.example\.workflow\.approval"/)
+  assert.match(xml, /camunda:modelerTemplateVersion="1"/)
+  const restored = await moddle.fromXML(xml)
+  assert.equal(restored.warnings.length, 0)
+  const restoredTask = restored.rootElement.rootElements[0].flowElements.find(item => item.id === 'Task_Manager')
+  assert.equal(restoredTask.name, '费用审批')
+  assert.equal(restoredTask.get('camunda:assignee'), '${reviewer}')
+  assert.equal(restoredTask.get('camunda:formKey'), 'expense-review')
+  assert.equal(restoredTask.get('camunda:modelerTemplate'), approvalTemplate.id)
+  assert.equal(restoredTask.get('camunda:modelerTemplateVersion'), 1)
+})
+
 test('Camunda multi-instance collection and element variable are preserved', async () => {
   const { moddle, rootElement } = await template('countersign-approval')
   const task = rootElement.rootElements[0].flowElements.find(item => item.id === 'Task_MultiReview')

@@ -54,7 +54,7 @@ pnpm preview    # 预览构建结果
 - `DataTable`：基于 Element Plus 的类型化列表格，支持列定义、Vue 单元格插槽、统一空值、金额/日期/标签/链接/字典/Tooltip/状态/枚举渲染；分页与数据请求由页面负责。
 - 表格示例使用本地静态数据，无需后端即可运行；Camunda 管理台流程定义列表复用 `DataTable`，保留页面查询、分页、行操作和详情联动。
 - BPMN 编辑器：默认展示“开始 → 提交需求 → 确认需求 → 结束”，支持绘图、XML 文件或粘贴导入、XML 编辑与复制、导出、当前画布部署和适应画布。
-- 自定义属性面板：编辑 Camunda 办理人/候选用户/候选组/表单、UserTask/ServiceTask 多实例，以及 ServiceTask 的 External/Java 执行方式；也可编辑流程/节点/连线基础字段和排他分支。
+- 自定义属性面板：编辑人工任务分配和运行属性、Camunda 执行/任务监听器及脚本、异步/重试、多实例和流程级属性，以及 ServiceTask 的 External/Java 执行方式；导入含暂未支持 Camunda 属性或扩展的元素时，面板显示只读摘要并可打开 XML 编辑；修改已支持字段会保留其他 XML 配置。
 - 六个常用审批模板，以及带元素定位的基础连接、名单和一层并行结构检查；检查错误会阻止文件导出。
 - Camunda 7 引擎联调页：通过 Vite 开发代理部署 BPMN、查询流程定义、启动实例、查询/领取/完成人工任务和查看活动树。
 - Camunda REST 管理台：`/camunda-console` 提供运行总览、部署与定义查询、定义/实例挂起恢复、实例终止、活动树与变量查看、任务与 External Task 查询、Job/Incident 异常查看、历史查询、JSON 导出和 Camunda 用户操作日志；页面直接调用官方 REST，仅用于开发联调。
@@ -174,17 +174,21 @@ node scripts/camunda-console-smoke.mjs
 | --- | --- | --- |
 | 流程标识 | Process 的 `id` | 单个根流程，可编辑并检查合法性、唯一性 |
 | 历史数据保留期 | `camunda:historyTimeToLive` | 根流程，默认 30 天；导入缺失该属性的 XML 时自动补齐 |
+| 流程执行属性 | `isExecutable`、`camunda:versionTag`、`camunda:jobPriority` | 流程面板编辑；部署前要求 `isExecutable=true` |
 | 流程/节点/连线名称 | `name` | 当前选中的流程、节点或顺序流 |
 | 办理人 | `camunda:assignee` | 人工任务；可为静态标识或由引擎解释的表达式 |
 | 候选用户 | `camunda:candidateUsers` | 人工任务；用户列表或表达式 |
 | 候选组 | `camunda:candidateGroups` | 人工任务；组列表或表达式 |
 | 表单 | `camunda:formKey` | 仅人工任务，表单引用标识，可空 |
-| 多实例 | `camunda:collection`、`camunda:elementVariable` 或标准 BPMN 循环次数 | UserTask/ServiceTask 支持集合、次数、并行或顺序；复杂完成条件只读保留 |
+| 人工任务运行属性 | `camunda:owner`、`candidateUsers`、`candidateGroups`、`dueDate`、`followUpDate`、`priority` 与 BPMN `documentation` | 人工任务，表达式按原文保存 |
+| 监听器与脚本 | `camunda:executionListener`、`camunda:taskListener`、`camunda:script`、`camunda:field` | 支持新增、编辑、排序和删除；目标 Camunda 执行仍须验证 |
+| 异步与失败重试 | `camunda:asyncBefore/asyncAfter`、`exclusive`、`jobPriority`、`failedJobRetryTimeCycle` | 流程、活动和多实例循环特征的适用属性；目标引擎 Job 行为尚待验证 |
+| 多实例 | `camunda:collection`、`elementVariable`、标准 BPMN 循环次数与完成条件 | UserTask/ServiceTask 支持集合、次数、并行/顺序和完成条件；输入/输出数据项只读保留 |
 | 服务任务执行 | `camunda:type/topic`、`camunda:class`、`camunda:delegateExpression`、`camunda:expression` | 支持 External Task、Java class、Delegate expression、Expression；只保存执行配置，不运行 worker |
 | 条件表达式 | `conditionExpression` | 排他网关出线，保存原文 |
 | 默认分支 | 来源网关的 `default` | 排他网关的一条出线引用 |
 
-节点、连线 ID 与类型只展示，位置和连线路径由画布编辑并保存为 BPMN DI。UEL/JUEL 只保存原文；监听器、异步/重试、输入输出映射等尚无专用表单。直接联调仅代表 Camunda REST 调用可用，不代表生产认证、业务审批或 Go 适配已完成。决策背景见 [Camunda 7 集成 ADR](./docs/adr/0002-camunda7-integration.md)。
+节点、连线 ID 与类型只展示，位置和连线路径由画布编辑并保存为 BPMN DI。UEL/JUEL、脚本和重试周期只保存原文；Camunda 表单数据、Connector 输入/输出映射等尚无专用表单，导入后会以只读摘要提示并保留。当前界面和 XML 测试不能证明目标 Camunda 引擎接受或执行这些配置。直接联调仅代表 Camunda REST 调用可用，不代表生产认证、业务审批或 Go 适配已完成。决策背景见 [Camunda 7 集成 ADR](./docs/adr/0002-camunda7-integration.md)。
 
 ### 流程图主题入口
 

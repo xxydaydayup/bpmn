@@ -63,6 +63,12 @@ modeling.updateProperties(task, {
 
 `DeleteErrorEventDefinitionBehavior` 需要识别 `camunda:ExternalCapable` 和 `camunda:ErrorEventDefinition`。没有 `camunda-bpmn-moddle` 时，bpmn-js 不知道这些 Camunda 类型，行为中的类型判断无法可靠命中；其他依赖类型判断的异步、输入输出和复制粘贴规则也一样。
 
+导入文件时，moddle 可识别的 Camunda 配置即使暂未提供专用编辑控件，也会留在模型中。属性面板会列出当前元素尚未覆盖的 Camunda 属性、扩展元素和其他命名空间属性，并提供完整 XML 编辑入口。修改面板已支持的字段时应使用局部 modeling.updateProperties() patch；不得重建 extensionElements 或循环特征来保存单个字段，否则会删除其他监听器、未知扩展、完成条件或多实例数据项。
+
+当前属性面板支持人工任务和开始事件的 Camunda formKey、formRef/formRefBinding/formRefVersion 互斥/依赖切换，以及嵌入式 FormData 的表单字段、枚举选项、约束和 Camunda 字段扩展属性增删编辑。表单控件只编辑这些明确列出的属性；字段或嵌套对象上其他 Camunda/厂商扩展仍留在 XML 中，局部命令更新不会重建它们。前端检查表单字段 ID 唯一性、枚举选项 ID 唯一性与非空，以及表单引用绑定依赖；不解释表单运行时、约束配置或表达式。
+
+Camunda 原始 moddle 描述未声明表单字段的通配子元素属性，moddle-xml 因此不会序列化直接挂在已知 camunda:FormField 上的 $children。设计器使用的 Camunda 描述副本为 FormField 增加 otherElements: Element[] 通配收纳口；字段内未知命名空间元素经此属性导入、局部编辑、导出和重新导入后保留。
+
 因此：
 
 ```text

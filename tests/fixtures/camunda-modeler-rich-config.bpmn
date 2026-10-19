@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:custom="https://example.org/custom" id="Definitions_ModelerFixture" targetNamespace="https://example.org/process">
+  <bpmn:process id="Process_ModelerFixture" name="Modeler compatibility fixture" isExecutable="true" camunda:historyTimeToLive="30" custom:deploymentHint="retain-me">
+    <bpmn:startEvent id="Start_1" name="Start"><bpmn:outgoing>Flow_1</bpmn:outgoing></bpmn:startEvent>
+    <bpmn:userTask id="Task_Apply" name="Apply" camunda:assignee="${requester}" camunda:formRef="application-form" camunda:formRefBinding="latest" camunda:dueDate="${dueDate}" camunda:priority="50" custom:taskHint="keep-task-hint">
+      <bpmn:extensionElements>
+        <camunda:executionListener event="end" custom:listenerHint="preserve-listener-attr"><camunda:script scriptFormat="javascript">execution.setVariable('submitted', true);</camunda:script><camunda:field name="auditKey"><camunda:string>request-audit</camunda:string></camunda:field></camunda:executionListener>
+        <camunda:taskListener event="assignment" expression="${audit.assignment(execution)}" />
+        <custom:marker value="retain-extension" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_1</bpmn:incoming><bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_Review" name="Review" camunda:assignee="${approver}">
+      <bpmn:incoming>Flow_2</bpmn:incoming><bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics isSequential="false" camunda:collection="${approverList}" camunda:elementVariable="approver">
+        <bpmn:completionCondition xsi:type="bpmn:tFormalExpression">${nrOfCompletedInstances == nrOfInstances}</bpmn:completionCondition>
+      </bpmn:multiInstanceLoopCharacteristics>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_Notify" name="Notify" camunda:type="external" camunda:topic="notifications"><bpmn:incoming>Flow_3</bpmn:incoming><bpmn:outgoing>Flow_4</bpmn:outgoing></bpmn:serviceTask>
+    <bpmn:endEvent id="End_1" name="End"><bpmn:incoming>Flow_4</bpmn:incoming></bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_1" targetRef="Task_Apply" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Apply" targetRef="Task_Review" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_Review" targetRef="Task_Notify" />
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_Notify" targetRef="End_1"><bpmn:extensionElements><camunda:executionListener event="take" expression="${audit.flow(execution)}" /></bpmn:extensionElements></bpmn:sequenceFlow>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_1"><bpmndi:BPMNPlane id="Plane_1" bpmnElement="Process_ModelerFixture">
+    <bpmndi:BPMNShape id="Start_1_di" bpmnElement="Start_1"><dc:Bounds x="100" y="150" width="36" height="36" /></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_Apply_di" bpmnElement="Task_Apply"><dc:Bounds x="200" y="130" width="110" height="80" /></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_Review_di" bpmnElement="Task_Review"><dc:Bounds x="370" y="130" width="110" height="80" /></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="Task_Notify_di" bpmnElement="Task_Notify"><dc:Bounds x="540" y="130" width="110" height="80" /></bpmndi:BPMNShape>
+    <bpmndi:BPMNShape id="End_1_di" bpmnElement="End_1"><dc:Bounds x="710" y="152" width="36" height="36" /></bpmndi:BPMNShape>
+    <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1"><di:waypoint x="136" y="168" /><di:waypoint x="200" y="170" /></bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2"><di:waypoint x="310" y="170" /><di:waypoint x="370" y="170" /></bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3"><di:waypoint x="480" y="170" /><di:waypoint x="540" y="170" /></bpmndi:BPMNEdge>
+    <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4"><di:waypoint x="650" y="170" /><di:waypoint x="710" y="170" /></bpmndi:BPMNEdge>
+  </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>
+</bpmn:definitions>

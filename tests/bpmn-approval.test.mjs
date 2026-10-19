@@ -157,14 +157,27 @@ test('custom panel multi-instance patches switch between collection and cardinal
   assert.doesNotMatch(xml, /camunda:collection=/)
 })
 
-test('unconfigured multi-instance sources block deployment validation; advanced loop data is read-only', async () => {
+test('unconfigured multi-instance sources block deployment validation; completion conditions remain editable', async () => {
   const { moddle, rootElement } = await template('serial-approval')
   const task = rootElement.rootElements[0].flowElements.find(item => item.id === 'Task_Manager')
   apply(task, multiInstancePatch(moddle, task, 'multiInstanceEnabled', 'true'))
   assert.ok(validateWorkflow(graph(rootElement)).some(issue => issue.code === 'missing-multi-instance-collection'))
   task.loopCharacteristics.completionCondition = moddle.create('bpmn:FormalExpression', { body: '${done}' })
-  assert.match(readMultiInstance(task).readOnlyReason, /完成条件/)
-  assert.throws(() => multiInstancePatch(moddle, task, 'multiInstanceEnabled', 'false'), /完成条件/)
+  const snapshot = readMultiInstance(task)
+  assert.equal(snapshot.completionCondition, '${done}')
+  assert.equal(snapshot.readOnlyReason, '')
+  const originalLoop = task.loopCharacteristics
+  const input = moddle.create('bpmn:Property', { id: 'input' })
+  const output = moddle.create('bpmn:Property', { id: 'output' })
+  task.loopCharacteristics.inputDataItem = input
+  task.loopCharacteristics.outputDataItem = output
+  apply(task, multiInstancePatch(moddle, task, 'multiInstanceCompletionCondition', '${nrOfCompletedInstances > 0}'))
+  assert.notEqual(task.loopCharacteristics, originalLoop)
+  assert.equal(task.loopCharacteristics.completionCondition.body, '${nrOfCompletedInstances > 0}')
+  assert.equal(task.loopCharacteristics.inputDataItem.id, 'input')
+  assert.equal(task.loopCharacteristics.outputDataItem.id, 'output')
+  assert.equal(task.loopCharacteristics.isSequential, false)
+  assert.throws(() => multiInstancePatch(moddle, task, 'multiInstanceEnabled', 'false'), /输入\/输出数据项/)
 })
 
 test('custom panel configures Camunda External Task and blocks a missing topic', async () => {

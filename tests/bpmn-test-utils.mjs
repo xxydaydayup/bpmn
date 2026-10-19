@@ -12,11 +12,22 @@ export async function load(name) {
 export const { validateWorkflow, isValidBpmnId } = await load('validation')
 export const { readMultiInstance, multiInstancePatch } = await load('multiInstance')
 export const { readServiceTask, serviceTaskPatch } = await load('serviceTask')
+export const { readUnsupportedConfiguration } = await load('unsupportedConfiguration')
+export const { readCamundaListeners, createCamundaListener, createListenerField, listenerFieldPatch, listenerImplementationPatch, validateCamundaListener } = await load('camundaListeners')
+export const { runtimeAttributePatch, retryCyclePatch, multiInstanceRetryCyclePatch, readRuntimeAttributes, userTaskRuntimePatch } = await load('camundaRuntime')
+export const { readCamundaForm, camundaFormPatch } = await load('camundaForms')
+export const { validateDeploymentProcesses } = await load('deployment')
 export const { DEFAULT_HISTORY_TIME_TO_LIVE, ensureHistoryTimeToLive } = await load('processDefaults')
 const require = createRequire(import.meta.url)
 const bpmnRequire = createRequire(require.resolve('bpmn-js/package.json'))
 export const { BpmnModdle } = await import(pathToFileURL(bpmnRequire.resolve('bpmn-moddle')).href)
-export const descriptor = JSON.parse(readFileSync(bpmnRequire.resolve('camunda-bpmn-moddle/resources/camunda.json'), 'utf8'))
+const rawCamundaDescriptor = JSON.parse(readFileSync(bpmnRequire.resolve('camunda-bpmn-moddle/resources/camunda.json'), 'utf8'))
+const moddleEnhancement = ts.transpileModule(
+  readFileSync(new URL('../src/bpmn/camundaModdle.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } },
+).outputText
+const { withCamundaFormFieldWildcard } = await import(`data:text/javascript;base64,${Buffer.from(moddleEnhancement).toString('base64')}`)
+export const descriptor = withCamundaFormFieldWildcard(rawCamundaDescriptor)
 export const graph = definitions => definitions.rootElements.filter(item => item.$type === 'bpmn:Process').map(process => ({
   id: process.id,
   nodes: (process.flowElements ?? []).filter(item => item.$instanceOf('bpmn:FlowNode')).map(item => ({

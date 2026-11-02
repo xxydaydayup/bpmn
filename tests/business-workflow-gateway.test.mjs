@@ -41,16 +41,69 @@ test('task template detail and delete follow the Swagger contract', async () => 
     'const request = async () => { throw new Error("Unexpected default request"); };',
   )
   const { createBusinessWorkflowGateway } = await import(moduleUrl(code))
-  const detail = { taskKey: 'leave/approval', bpmnXml: '<bpmn />' }
+  const detail = { templateKey: 'leave/approval', templateName: '请假审批', bpmnXml: '<bpmn />' }
   const gateway = createBusinessWorkflowGateway(async config => {
     calls.push(config)
-    return { data: detail }
+    return config.method === 'DELETE'
+      ? { data: { templateKey: 'leave/approval', status: 'deleted' } }
+      : { data: detail }
   })
 
-  assert.deepEqual(await gateway.getTemplate('leave/approval'), detail)
-  assert.deepEqual(await gateway.deleteTemplate('leave/approval'), detail)
+  assert.deepEqual(await gateway.getTemplate('leave/approval'), { ...detail, taskKey: 'leave/approval', taskName: '请假审批' })
+  assert.deepEqual(await gateway.deleteTemplate('leave/approval'), { templateKey: 'leave/approval', status: 'deleted', taskKey: 'leave/approval' })
   assert.equal(calls[0].method, 'GET')
-  assert.equal(calls[0].url, '/v1/task/deployments/leave%2Fapproval')
+  assert.equal(calls[0].url, '/v1/template/leave%2Fapproval')
   assert.equal(calls[1].method, 'DELETE')
-  assert.equal(calls[1].url, '/v1/task/deployments/leave%2Fapproval')
+  assert.equal(calls[1].url, '/v1/template/leave%2Fapproval')
+})
+
+test('template listing uses current Swagger path and normalizes backend fields', async () => {
+  const calls = []
+  const code = compiled.replace(
+    /import \{ request \} from ['"]@\/utils\/request['"];?/,
+    'const request = async () => { throw new Error("Unexpected default request"); };',
+  )
+  const { createBusinessWorkflowGateway } = await import(moduleUrl(code))
+  const gateway = createBusinessWorkflowGateway(async config => {
+    calls.push(config)
+    return { data: [{ templateKey: 'leave', templateName: '请假审批', globalVariables: [{ name: 'applicant', type: 'String', value: 'alice', source: 'start', required: true }] }] }
+  })
+
+  const rows = await gateway.listTemplates({ maxResults: 100 })
+  assert.equal(calls[0].url, '/v1/template')
+  assert.deepEqual(calls[0].params, { maxResults: 100 })
+  assert.equal(rows[0].taskKey, 'leave')
+  assert.equal(rows[0].taskName, '请假审批')
+  assert.equal(rows[0].globalVariables[0].defaultValue, 'alice')
+})
+
+test('publishing and starting use current Swagger contracts', async () => {
+  const code = compiled.replace(
+    /import \{ request \} from ['"]@\/utils\/request['"];?/,
+    'const request = async () => { throw new Error("Unexpected default request"); };',
+  )
+  const { createBusinessWorkflowGateway } = await import(moduleUrl(code))
+  let publishConfig
+  const publisher = createBusinessWorkflowGateway(async config => {
+    publishConfig = config
+    return { data: { templateKey: 'leave', templateName: '请假审批' } }
+  })
+  const published = await publisher.publishTemplate('<bpmn />', '请假审批')
+  assert.equal(publishConfig.url, '/v1/template')
+  assert.equal(publishConfig.method, 'POST')
+  assert.equal(publishConfig.data.get('deployment-name'), '请假审批')
+  assert.equal(published.taskKey, 'leave')
+  assert.equal(published.taskName, '请假审批')
+
+  let startConfig
+  const starter = createBusinessWorkflowGateway(async config => {
+    startConfig = config
+    return { data: { id: 4, templateKey: 'leave', templateName: '请假审批', templateId: 3, businessKey: 'leave-1', processInstanceId: 'instance-1' } }
+  })
+  const instance = await starter.startTaskInstance({ taskKey: 'leave', businessKey: 'leave-1', variables: { applicant: 'alice' } })
+  assert.equal(startConfig.url, '/v1/task/instances/start')
+  assert.deepEqual(startConfig.data, { templateKey: 'leave', businessKey: 'leave-1', variables: { applicant: 'alice' } })
+  assert.equal(instance.taskKey, 'leave')
+  assert.equal(instance.taskName, '请假审批')
+  assert.equal(instance.taskTemplateId, 3)
 })

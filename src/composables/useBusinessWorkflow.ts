@@ -36,7 +36,6 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
   const selectedTask = ref<BusinessUserTask>()
   const reassignTargetTask = ref<BusinessUserTask>()
   const businessKey = ref('')
-  const startedBy = ref('')
   const startVariablesText = ref('{}')
   const completeVariablesText = ref('{}')
   const reassignUserId = ref('')
@@ -66,7 +65,11 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
   function applyTemplateDefaults() {
     const defaults: BusinessVariables = {}
     for (const item of selectedTemplate.value?.globalVariables ?? []) {
-      if (item.defaultValue !== undefined && item.defaultValue !== null) defaults[item.name] = item.defaultValue
+      const defaultValue = item.defaultValue !== undefined ? item.defaultValue : item.value
+      if (item.source !== 'complete' && item.source !== 'engine'
+        && defaultValue !== undefined && defaultValue !== null && defaultValue !== '') {
+        defaults[item.name] = defaultValue
+      }
     }
     startVariablesText.value = JSON.stringify(defaults, null, 2)
   }
@@ -138,14 +141,11 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
       templates.value = templates.value.filter(item => item.taskKey !== taskKey)
       if (selectedTemplateKey.value === taskKey) selectTemplate(templates.value[0]?.taskKey ?? '')
       if (templateDetailKey.value === taskKey) clearTemplateDetail()
-      notice.value = `任务模板 ${taskKey} 及其流程定义版本已删除`
+      notice.value = `任务模板 ${taskKey} 已删除，历史版本和引擎部署已保留`
       await loadTemplates()
       return true
     } catch (cause) {
-      const status = isAxiosError(cause) ? cause.response?.status : undefined
-      error.value = status === 409
-        ? '该任务模板存在运行中的任务实例，当前无法删除'
-        : errorMessage(cause, '任务模板删除失败')
+      error.value = errorMessage(cause, '任务模板删除失败')
       return false
     } finally {
       deletingTemplateKey.value = ''
@@ -167,7 +167,6 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
       const input = {
         taskKey: template.taskKey,
         businessKey: businessKey.value.trim(),
-        ...(startedBy.value.trim() ? { startedBy: startedBy.value.trim() } : {}),
         variables,
       }
       lastInstance.value = await gateway.startTaskInstance(input)
@@ -355,7 +354,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
   }
 
   return { templates, selectedTemplateKey, selectedTemplate, tasks, lastInstance, selectedTask, reassignTargetTask,
-    businessKey, startedBy, startVariablesText, completeVariablesText, reassignUserId, error, notice,
+    businessKey, startVariablesText, completeVariablesText, reassignUserId, error, notice,
     templateLoading, templateDetailLoading, templateDetail, templateDetailKey, templateDetailError, deletingTemplateKey, starting, taskLoading, completing, reassigning, taskFilter,
     canStart, selectTemplate, loadTemplates, loadTemplateDetail, clearTemplateDetail, deleteTemplate, startSelectedTemplate, loadTasks, openComplete, completeSelectedTask,
     openReassign, closeReassign, reassignSelectedTask, refuseTask, taskBusy, taskActionLoading, resetTaskFilters, dispose }

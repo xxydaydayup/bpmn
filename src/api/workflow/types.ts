@@ -4,6 +4,9 @@ export interface TaskTemplateVariable {
   name: string
   type: string
   required: boolean
+  /** Backend field used for the variable's declared/default value. */
+  value?: unknown
+  source?: string
   defaultValue?: unknown
   description?: string
 }
@@ -78,7 +81,6 @@ export interface StartBusinessTaskInput {
   taskKey: string
   businessKey: string
   variables?: BusinessVariables
-  startedBy?: string
   callbackUrl?: string
   extra?: Record<string, unknown>
   parentBusinessKey?: string

@@ -58,9 +58,9 @@ async function confirmDeleteTemplate(value: unknown) {
   const row = value as TaskTemplate
   try {
     await ElMessageBox.confirm(
-      `删除任务模板“${row.taskName}”（${row.taskKey}）会同时清除当前租户下该 key 的全部流程定义版本。存在运行中任务实例时后端会拒绝删除。此操作无法撤销，确认继续吗？`,
+      `删除任务模板“${row.taskName}”（${row.taskKey}）会删除当前模板记录，但保留历史版本和引擎部署。此操作无法撤销，确认继续吗？`,
       '删除任务模板',
-      { type: 'warning', confirmButtonText: '删除模板及全部版本', cancelButtonText: '取消' },
+      { type: 'warning', confirmButtonText: '删除模板', cancelButtonText: '取消' },
     )
   } catch {
     return
@@ -134,7 +134,7 @@ function consistencyTag(status: 'passed' | 'failed' | 'observed') {
         <template v-if="workflow.selectedTemplate.value">
           <ElDescriptions :column="1" border size="small"><ElDescriptionsItem label="taskKey">{{ workflow.selectedTemplate.value.taskKey }}</ElDescriptionsItem><ElDescriptionsItem label="租户">{{ workflow.selectedTemplate.value.tenantId || '—' }}</ElDescriptionsItem><ElDescriptionsItem label="流程定义">{{ workflow.selectedTemplate.value.processDefinitionId }}</ElDescriptionsItem></ElDescriptions>
           <div v-if="workflow.selectedTemplate.value.globalVariables?.length" class="variable-requirements"><strong>变量要求</strong><span v-for="item in workflow.selectedTemplate.value.globalVariables" :key="item.name"><code>{{ item.name }}</code> · {{ item.type }}{{ item.required ? ' · 必填' : '' }}<small v-if="item.description">{{ item.description }}</small></span></div>
-          <ElForm label-position="top" class="start-form" @submit.prevent="workflow.startSelectedTemplate"><ElFormItem label="业务键"><ElInput v-model="workflow.businessKey.value" placeholder="必须唯一，例如 order-20260929-001" /></ElFormItem><ElFormItem label="发起人"><ElInput v-model="workflow.startedBy.value" placeholder="可选用户标识" /></ElFormItem><ElFormItem label="启动变量 JSON"><ElInput v-model="workflow.startVariablesText.value" type="textarea" :rows="7" spellcheck="false" /></ElFormItem><ElButton type="primary" :icon="VideoPlay" :loading="workflow.starting.value" :disabled="!workflow.canStart.value" native-type="submit">启动实例</ElButton></ElForm>
+          <ElForm label-position="top" class="start-form" @submit.prevent="workflow.startSelectedTemplate"><ElFormItem label="业务键"><ElInput v-model="workflow.businessKey.value" placeholder="必须唯一，例如 order-20260929-001" /></ElFormItem><ElFormItem label="启动变量 JSON"><ElInput v-model="workflow.startVariablesText.value" type="textarea" :rows="7" spellcheck="false" /></ElFormItem><ElButton type="primary" :icon="VideoPlay" :loading="workflow.starting.value" :disabled="!workflow.canStart.value" native-type="submit">启动实例</ElButton></ElForm>
           <p class="variable-help">启动变量按所选流程配置。会签模板示例：<code>{"assigneeStart":"user1","approverList":["user2","user3"]}</code>；该模板的提交评审节点会自动初始化 <code>agreeCount</code>。</p>
           <ElDescriptions v-if="workflow.lastInstance.value" :column="1" border class="instance-result"><ElDescriptionsItem label="业务实例 ID">{{ workflow.lastInstance.value.id }}</ElDescriptionsItem><ElDescriptionsItem label="businessKey">{{ workflow.lastInstance.value.businessKey }}</ElDescriptionsItem><ElDescriptionsItem label="processInstanceId">{{ workflow.lastInstance.value.processInstanceId }}</ElDescriptionsItem><ElDescriptionsItem label="启动时状态">{{ workflow.lastInstance.value.status }}</ElDescriptionsItem></ElDescriptions>
           <p v-if="workflow.lastInstance.value" class="variable-help">启动后点击“刷新任务”查看本实例待办。上方状态来自启动响应；没有人工任务时，流程仍可能等待服务任务。</p>
@@ -147,7 +147,7 @@ function consistencyTag(status: 'passed' | 'failed' | 'observed') {
       <template #header><div class="card-heading"><div><h2>业务接口 / Camunda 一致性</h2><p>只比较稳定标识和业务语义，不比较时间戳或响应顺序</p></div><ElTag v-if="consistencyReport" :type="consistencyReport.ok ? 'success' : 'danger'">{{ consistencyReport.ok ? '一致' : '需核查' }}</ElTag></div></template>
       <ElAlert v-if="consistencyError" type="error" :closable="false" show-icon :title="consistencyError" />
       <div v-if="consistencyReport" class="consistency-list"><div v-for="item in consistencyReport.checks" :key="item.key" class="consistency-row"><ElTag :type="consistencyTag(item.status)">{{ item.status === 'passed' ? '通过' : item.status === 'failed' ? '失败' : '已观察' }}</ElTag><div><strong>{{ item.label }}</strong><p>{{ item.detail }}</p></div></div></div>
-      <ElAlert type="info" :closable="false" show-icon title="清理边界" description="业务接口支持按 taskKey 删除当前模板及该租户下全部流程定义版本；运行中的任务实例需先完成，业务任务实例记录暂不提供删除操作。" />
+      <ElAlert type="info" :closable="false" show-icon title="清理边界" description="业务接口按 templateKey 删除当前模板记录，历史版本与引擎部署会保留；业务任务实例记录暂不提供删除操作。" />
     </ElCard>
 
     <ElCard shadow="never" class="business-card task-card">

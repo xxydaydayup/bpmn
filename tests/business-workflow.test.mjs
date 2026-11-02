@@ -98,7 +98,7 @@ test('refusing a task leaves it pending reassignment until assigned to a user', 
   }
 })
 
-test('template details load by key and deletion updates selection while preserving conflict state', async () => {
+test('template details load by key and deletion updates selection while surfacing backend errors', async () => {
   const templates = [
     { taskKey: 'leave', taskName: '请假', version: 2, globalVariables: [] },
     { taskKey: 'expense', taskName: '报销', version: 1, globalVariables: [] },
@@ -130,7 +130,7 @@ test('template details load by key and deletion updates selection while preservi
     rejectDeletion = true
     assert.equal(await workflow.deleteTemplate('expense'), false)
     assert.deepEqual(workflow.templates.value.map(item => item.taskKey), ['expense'])
-    assert.equal(workflow.error.value, '该任务模板存在运行中的任务实例，当前无法删除')
+    assert.equal(workflow.error.value, 'active instances')
   } finally {
     workflow.dispose()
     scope.stop()
@@ -158,6 +158,39 @@ test('template deletion blocks duplicate requests until the active delete settle
     finishDelete()
     assert.equal(await activeDelete, true)
     assert.equal(workflow.deletingTemplateKey.value, '')
+  } finally {
+    workflow.dispose()
+    scope.stop()
+  }
+})
+
+test('template defaults include only start variables and instance start has no unsupported actor field', async () => {
+  const template = {
+    taskKey: 'leave', taskName: '请假', startable: true, suspended: false,
+    globalVariables: [
+      { name: 'applicant', type: 'String', value: 'alice', source: 'start', required: true },
+      { name: 'vote', type: 'String', value: '', source: 'complete', required: true },
+      { name: 'reminder', type: 'String', value: 'PT10M', source: 'engine', required: false },
+    ],
+  }
+  let started
+  const gateway = {
+    listTemplates: async () => [template],
+    startTaskInstance: async input => {
+      started = input
+      return { id: 5, taskKey: 'leave', businessKey: input.businessKey, processInstanceId: 'instance-5' }
+    },
+  }
+  const scope = effectScope()
+  const workflow = scope.run(() => useBusinessWorkflow(gateway))
+
+  try {
+    await workflow.loadTemplates()
+    assert.deepEqual(JSON.parse(workflow.startVariablesText.value), { applicant: 'alice' })
+    workflow.businessKey.value = 'leave-5'
+    await workflow.startSelectedTemplate()
+    assert.deepEqual(started, { taskKey: 'leave', businessKey: 'leave-5', variables: { applicant: 'alice' } })
+    assert.equal(workflow.lastInstance.value.processInstanceId, 'instance-5')
   } finally {
     workflow.dispose()
     scope.stop()

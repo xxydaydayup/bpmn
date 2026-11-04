@@ -1,6 +1,6 @@
 # 设计器样式维护说明
 
-这套界面沿用 Vue、Element Plus 和 bpmn-js；人工/服务任务采用业务卡片，图标为本地 Tabler Icons 3.47.0。画布支持顶部工具栏切换预设主题；主题只影响运行时展示，页面暂未开放逐节点改色功能。
+这套界面沿用 Vue、Element Plus 和 bpmn-js；人工/服务任务采用业务卡片，图标为本地 Tabler Icons 3.47.0。本地 SVG 来源目录为 `src/assets/tabler/`，许可和来源记录见该目录的 `README.md`。独立的 Vue Flow 业务设计器使用 `@tabler/icons-vue` 同版本图标组件，映射位于 `packages/workflow-designer/src/WorkflowDesigner.vue` 和 `packages/workflow-designer/src/nodes/WorkflowNode.vue`，不与 BPMN 模块共享运行时组件。画布支持顶部工具栏切换预设主题；主题只影响运行时展示，页面暂未开放逐节点改色功能。
 
 ## 修改入口
 
@@ -11,7 +11,8 @@
 | 中文字体与字号 | 同文件 → `typography` |
 | 卡片尺寸、圆角、线宽、图标大小、内边距 | 同文件 → `card`；运行时主题切换保持几何不变 |
 | 自动布局的节点、层与连线间距 | 同文件 → `layout`；运行时主题切换保持布局参数不变 |
-| 替换 Tabler 图标 | `src/bpmn/icons.ts` 的 SVG 导入与 `diagramIcons` |
+| 替换 BPMN 设计器 Tabler 图标 | `src/bpmn/icons.ts` 的 SVG 导入与 `diagramIcons` |
+| 替换 Vue Flow 业务设计器图标 | `packages/workflow-designer/src/WorkflowDesigner.vue`、`packages/workflow-designer/src/nodes/WorkflowNode.vue`；依赖版本见该包 `package.json` |
 | 节点库分组与名称 | 同文件 → `nodePresentation`、`libraryGroups` |
 | 工具栏、工作区布局和响应式断点 | `src/styles/designer.css` |
 | 官方属性面板主题映射与布局 | `src/bpmn/theme.ts`、`src/styles/designer.css`；provider 分组适配见 `src/bpmn/propertiesPanelIntegration.ts` |

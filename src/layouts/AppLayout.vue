@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ElButton, ElIcon, ElMenu, ElMenuItem } from 'element-plus'
 import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting, Tickets } from '@element-plus/icons-vue'
-// import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Monitor, Setting } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -10,12 +9,12 @@ import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 const app = useAppStore()
 const route = useRoute()
 const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
-const isDesigner = computed(() => route.path === '/designer')
-const collapsed = computed(() => isDesigner.value || app.sidebarCollapsed)
+const isWorkflowEditor = computed(() => route.path === '/designer' || route.path === '/workflow-designer')
+const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'is-collapsed': collapsed, 'designer-shell': isDesigner }">
+  <div class="app-shell" :class="{ 'is-collapsed': collapsed, 'designer-shell': isWorkflowEditor, 'workflow-designer-shell': route.path === '/workflow-designer' }">
     <aside class="sidebar">
       <RouterLink to="/" class="brand" aria-label="流程工作台首页">
         <span class="brand-mark"><ElIcon :size="22"><Connection /></ElIcon></span>
@@ -35,7 +34,11 @@ const collapsed = computed(() => isDesigner.value || app.sidebarCollapsed)
         </ElMenuItem>
         <ElMenuItem index="/designer" aria-label="流程设计">
           <ElIcon><Connection /></ElIcon>
-          <template #title><span>流程设计</span></template>
+          <template #title><span>BPMN/XML 设计</span></template>
+        </ElMenuItem>
+        <ElMenuItem index="/workflow-designer" aria-label="业务工作流设计器">
+          <ElIcon><Connection /></ElIcon>
+          <template #title><span>业务工作流设计</span></template>
         </ElMenuItem>
         <ElMenuItem v-if="workflowRuntime.developerToolsEnabled" index="/camunda" aria-label="Camunda 7 引擎联调">
           <ElIcon><VideoPlay /></ElIcon>
@@ -61,7 +64,7 @@ const collapsed = computed(() => isDesigner.value || app.sidebarCollapsed)
     </aside>
 
     <div class="main-shell">
-      <header v-if="!isDesigner" class="app-header">
+      <header v-if="!isWorkflowEditor" class="app-header">
         <ElButton
           text
           :icon="app.sidebarCollapsed ? Expand : Fold"

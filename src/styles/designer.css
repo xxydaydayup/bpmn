@@ -163,4 +163,10 @@
   .designer-document-actions { justify-content: flex-end; }
   .designer-title-line h1 { font-size: 15px; }
 }
+@media (max-width: 760px) {
+  .workflow-designer-shell { height: auto; min-height: 100dvh; overflow: visible; }
+  .workflow-designer-shell > .main-shell { min-height: 100dvh; }
+  .workflow-designer-shell .page-container { height: auto; min-height: 100dvh; overflow: visible; }
+  .workflow-designer-page { height: auto; min-height: 100dvh; overflow: visible; }
+}
 @media (prefers-reduced-motion: reduce) { .designer-page * { transition: none !important; } }

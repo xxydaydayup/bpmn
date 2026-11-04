@@ -25,6 +25,12 @@ const router = createRouter({
           meta: { title: '流程设计' },
         },
         {
+          path: 'workflow-designer',
+          name: 'workflow-designer',
+          component: () => import('@/views/WorkflowDesignerHostView.vue'),
+          meta: { title: '业务工作流设计器' },
+        },
+        {
           path: 'camunda',
           name: 'camunda',
           component: () => import('@/views/CamundaRuntimeView.vue'),

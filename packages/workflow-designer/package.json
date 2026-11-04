@@ -1,0 +1,45 @@
+{
+  "name": "@workflow/designer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "src/fixtures"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "style": "./dist/style.css",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./style.css": "./dist/style.css",
+    "./fixtures/project-approval.json": "./src/fixtures/project-approval.json"
+  },
+  "scripts": {
+    "build": "pnpm typecheck && vue-tsc -p tsconfig.build.json && vite build",
+    "typecheck": "vue-tsc --noEmit && vue-tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@vue-flow/core": "^1.48.2",
+    "vue": "^3.5.0"
+  },
+  "dependencies": {
+    "@tabler/icons-vue": "3.47.0",
+    "elkjs": "0.12.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.7",
+    "vitest": "^3.2.4",
+    "vue": "^3.5.22",
+    "vue-tsc": "^3.1.0"
+  }
+}

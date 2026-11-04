@@ -14,6 +14,7 @@
 | --- | --- |
 | 启动、确认功能或配置环境 | [README](./README.md)；代理配置再读 [vite.config.ts](./vite.config.ts) 和 [.env.example](./.env.example) |
 | 画布生命周期、选择、历史和 XML 操作 | [useBpmnDesigner.ts](./src/composables/useBpmnDesigner.ts)；页面交互再读 [DesignerView.vue](./src/views/DesignerView.vue) |
+| Vue 业务工作流设计器（/workflow-designer 页面或 packages/workflow-designer 包），含新增节点和节点属性 | [ADR-0005](./docs/adr/0005-vue-workflow-designer.md)；[设计器包说明](./packages/workflow-designer/README.md)；编译契约、params_rules 与启动传参示例再读 [立项申请示例](./packages/workflow-designer/docs/examples/立项申请/立项申请.js) |
 | 新增属性、调整 Camunda 依赖或编辑联动 | [建模依赖说明](./docs/camunda-modeling.md)；[camunda.json](./node_modules/camunda-bpmn-moddle/resources/camunda.json)；[types.ts](./src/bpmn/types.ts)；[NodePropertiesPanel.vue](./src/components/designer/NodePropertiesPanel.vue)；[useBpmnDesigner.ts](./src/composables/useBpmnDesigner.ts) |
 | 修改 XML 契约或 Camunda 联调 | [ADR-0002](./docs/adr/0002-camunda7-integration.md)；[XML 测试](./tests/bpmn-approval.test.mjs)；REST 联调再读 [gateway.ts](./src/api/camunda/gateway.ts) 和 [CamundaRuntimeView.vue](./src/views/CamundaRuntimeView.vue) |
 | 修改流程控制面、引擎验证或业务/引擎边界 | [ADR-0004](./docs/adr/0004-workflow-control-plane.md)；[README](./README.md) 中的当前能力和未实现项 |

@@ -2,13 +2,27 @@ export type BusinessVariables = Record<string, unknown>
 
 export interface TaskTemplateVariable {
   name: string
+  /** Optional node-local field identifier supplied by newer parameter-rule APIs. */
+  fieldKey?: string
   type: string
-  required: boolean
+  required?: boolean
+  nodeId?: string
+  nodeName?: string
+  nodeType?: string
   /** Backend field used for the variable's declared/default value. */
   value?: unknown
   source?: string
   defaultValue?: unknown
   description?: string
+}
+
+/** Optional template metadata submitted together with a BPMN deployment. */
+export interface PublishTemplateMetadata {
+  templateKey?: string
+  templateName?: string
+  startable?: boolean
+  suspended?: boolean
+  displayJson?: Record<string, unknown>
 }
 
 export interface TaskTemplate {
@@ -27,6 +41,7 @@ export interface TaskTemplate {
   startable: boolean
   suspended: boolean
   globalVariables?: TaskTemplateVariable[]
+  displayJson?: Record<string, unknown> | null
   extra?: Record<string, unknown> | null
   createdAt?: string
   updatedAt?: string
@@ -35,7 +50,7 @@ export interface TaskTemplate {
 }
 
 export interface TaskTemplateDetail extends TaskTemplate {
-  bpmnXml: string
+  bpmnXml?: string
 }
 
 export interface TaskTemplateDeleteResult {
@@ -149,7 +164,7 @@ export interface TaskReassignResult {
 }
 
 export interface BusinessWorkflowGateway {
-  publishTemplate(xml: string, deploymentName: string): Promise<TaskTemplate>
+  publishTemplate(xml: string, deploymentName: string, metadata?: PublishTemplateMetadata): Promise<TaskTemplate>
   listTemplates(query?: TaskTemplateQuery, signal?: AbortSignal): Promise<TaskTemplate[]>
   getTemplate(taskKey: string, signal?: AbortSignal): Promise<TaskTemplateDetail>
   deleteTemplate(taskKey: string): Promise<TaskTemplateDeleteResult>

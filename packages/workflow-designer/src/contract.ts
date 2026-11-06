@@ -1,8 +1,8 @@
 import type { WorkflowDesignDocument, WorkflowEditorState, WorkflowInput, WorkflowModel, WorkflowValidationIssue } from './types'
 
-export const WORKFLOW_NODE_TYPES = ['start', 'approval', 'countersign', 'service', 'condition', 'end'] as const
+export const WORKFLOW_NODE_TYPES = ['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'end'] as const
 const MODEL_KEYS = new Set(['processId', 'processName', 'nodes', 'flows'])
-const NODE_KEYS = new Set(['id', 'type', 'name', 'x', 'y', 'form', 'sequential', 'reminder', 'serviceName', 'serviceUrl', 'countersign', 'approveMode', 'passRate'])
+const NODE_KEYS = new Set(['id', 'type', 'name', 'x', 'y', 'form', 'messageName', 'timerType', 'timerValue', 'sequential', 'reminder', 'serviceName', 'serviceUrl', 'countersign', 'approveMode', 'passRate'])
 const FLOW_KEYS = new Set(['source', 'target', 'branch', 'conditionExpression'])
 
 export interface ParsedWorkflowInput {
@@ -107,6 +107,17 @@ export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIs
     if (node.type === 'service' && node.serviceUrl?.trim()) {
       try { const url = new URL(node.serviceUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('scheme') }
       catch { issues.push({ code: 'service-url', message: '服务地址必须是有效的 HTTP 或 HTTPS URL。', nodeId: node.id }) }
+    }
+    if (node.type === 'receive' && node.messageName !== undefined && typeof node.messageName !== 'string') {
+      issues.push({ code: 'message-name-type', message: '消息名必须是文本。', nodeId: node.id })
+    }
+    if (node.type === 'timer') {
+      if (node.timerType !== undefined && !['duration', 'date', 'cycle'].includes(String(node.timerType))) {
+        issues.push({ code: 'timer-type', message: '等待条件仅支持时长、指定时刻或周期。', nodeId: node.id })
+      }
+      if (node.timerValue !== undefined && typeof node.timerValue !== 'string') {
+        issues.push({ code: 'timer-value-type', message: '定时时间必须是文本。', nodeId: node.id })
+      }
     }
   }
   const visiting = new Set<string>(), visited = new Set<string>()

@@ -40,7 +40,13 @@ const deploy = async (model: WorkflowModel) => {
   const xml = await compile(model)
   const bpmnXml = xml.bpmnXml
   try {
-    const result = await businessWorkflowGateway.publishTemplate(bpmnXml, model.processName)
+    const result = await businessWorkflowGateway.publishTemplate(bpmnXml, model.processName, {
+      templateKey: model.processId,
+      templateName: model.processName,
+      startable: true,
+      suspended: false,
+      displayJson: model,
+    })
     assertDeploymentResult(result)
     deployment.value = result
     deployedModel.value = JSON.stringify(model)

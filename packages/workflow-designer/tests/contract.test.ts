@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../src/fixtures/project-approval.json'
 import { createDesignDocument, parseWorkflowInput } from '../src/contract'
-import { fromCanvas, toCanvas } from '../src/adapter'
+import { createNodeRecord, fromCanvas, toCanvas } from '../src/adapter'
 import { validateWorkflowModel } from '../src/validation'
 import type { WorkflowModel } from '../src/types'
 
@@ -42,6 +42,36 @@ describe('WorkflowModel v1 public contract', () => {
     expect(parsed.unknownPaths).toEqual([])
     expect(fromCanvas(mapped.nodes, mapped.edges, parsed.model)).toEqual(serviceModel)
     expect(validateWorkflowModel(serviceModel)).toEqual([])
+  })
+
+  it('round-trips message and timer wait nodes with backend field names and timer defaults', () => {
+    const eventModel = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'minister'
+        ? { ...node, type: 'receive', messageName: 'approval.finished' }
+        : node.id === 'gwMinister'
+          ? { ...node, type: 'timer', timerType: 'duration', timerValue: 'PT30M' }
+          : node),
+    } as WorkflowModel
+    const parsed = parseWorkflowInput(eventModel)
+    const canvas = toCanvas(parsed.model)
+    expect(parsed.unknownPaths).toEqual([])
+    expect(fromCanvas(canvas.nodes, canvas.edges, parsed.model)).toEqual(eventModel)
+    expect(validateWorkflowModel(eventModel)).toEqual([])
+    expect(createNodeRecord('timer', 'timer_1', 20, 30)).toMatchObject({ timerType: 'duration', timerValue: 'PT30M' })
+  })
+
+  it('validates timer values by the selected condition and allows runtime values to stay empty', () => {
+    const timer = { ...model, nodes: model.nodes.map(node => node.id === 'minister'
+      ? { ...node, type: 'timer', timerType: 'duration', timerValue: '' }
+      : node) } as WorkflowModel
+    expect(validateWorkflowModel(timer)).toEqual([])
+    const date = { ...timer, nodes: timer.nodes.map(node => node.id === 'minister' ? { ...node, timerType: 'date', timerValue: '2026-12-31T23:59:59' } : node) }
+    expect(validateWorkflowModel(date)).toEqual([])
+    const cycle = { ...timer, nodes: timer.nodes.map(node => node.id === 'minister' ? { ...node, timerType: 'cycle', timerValue: 'R3/PT10H' } : node) }
+    expect(validateWorkflowModel(cycle)).toEqual([])
+    const invalid = { ...timer, nodes: timer.nodes.map(node => node.id === 'minister' ? { ...node, timerType: 'duration', timerValue: 'tomorrow' } : node) }
+    expect(validateWorkflowModel(invalid)).toContainEqual(expect.objectContaining({ code: 'timer-value-format', nodeId: 'minister' }))
   })
 
   it('validates the service mode and VOTE rate only when service countersign is enabled', () => {

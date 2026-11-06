@@ -18,9 +18,11 @@
       "required": ["id", "type", "name", "x", "y"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["start", "approval", "countersign", "service", "condition", "end"] },
+        "type": { "enum": ["start", "approval", "countersign", "service", "receive", "timer", "condition", "end"] },
         "name": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" },
-        "form": { "type": "string" }, "sequential": { "type": "boolean" },
+        "form": { "type": "string" }, "messageName": { "type": "string" },
+        "timerType": { "enum": ["duration", "date", "cycle"] }, "timerValue": { "type": "string" },
+        "sequential": { "type": "boolean" },
         "reminder": { "type": "object", "additionalProperties": false, "properties": { "duration": { "type": "string", "description": "ISO-8601 超时时长；留空时可由流程启动变量提供，仍未提供则后端按 P1D 兜底。" }, "action": { "enum": ["notify", "return", "end"], "description": "超时处理方式；缺省 notify。" }, "target": { "type": "string", "description": "仅 action=return：退回到已存在的审批或服务活动节点。" }, "name": { "type": "string", "description": "边界定时事件名称/提醒文案。" } } },
         "serviceName": { "type": "string" }, "serviceUrl": { "type": "string" },
         "countersign": { "type": "boolean", "description": "启用服务节点的多实例调用与会签结果汇总。" },

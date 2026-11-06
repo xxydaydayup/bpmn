@@ -4,6 +4,7 @@ export interface WorkflowTemplate {
   id: string
   name: string
   description: string
+  sourceProcessDefinitionId?: string
   model: WorkflowModel
 }
 
@@ -112,6 +113,50 @@ export const workflowTemplates: WorkflowTemplate[] = [
       flows: flows([
         { source: 'start', target: 'approve' }, { source: 'approve', target: 'service' },
         { source: 'service', target: 'end' },
+      ]),
+    },
+  },
+  {
+    id: 'msg-wait',
+    name: '消息等待（msg-wait）',
+    description: '申请人审批后等待 msg_wait_name 消息，再进入审批节点。',
+    sourceProcessDefinitionId: 'msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae',
+    model: {
+      processId: 'msg-wait', processName: '第一个消息等待流程',
+      nodes: nodes([
+        { id: 'start', type: 'start', name: '发起', x: 320, y: 40 },
+        { id: 'approval_2dd48f093b4742969a7a5356bcff3302', type: 'approval', name: '申请人', x: 320, y: 170 },
+        { id: 'receive_c29619a580da4ede8ced0b2807c42e26', type: 'receive', name: '消息等待', messageName: 'msg_wait_name', x: 320, y: 300 },
+        { id: 'approval_294d81ce5e0343bba8418f7149a5e17e', type: 'approval', name: '审批', x: 320, y: 430 },
+        { id: 'end', type: 'end', name: '结束', x: 320, y: 560 },
+      ]),
+      flows: flows([
+        { source: 'start', target: 'approval_2dd48f093b4742969a7a5356bcff3302' },
+        { source: 'approval_2dd48f093b4742969a7a5356bcff3302', target: 'receive_c29619a580da4ede8ced0b2807c42e26' },
+        { source: 'receive_c29619a580da4ede8ced0b2807c42e26', target: 'approval_294d81ce5e0343bba8418f7149a5e17e' },
+        { source: 'approval_294d81ce5e0343bba8418f7149a5e17e', target: 'end' },
+      ]),
+    },
+  },
+  {
+    id: 'timer01',
+    name: '定时等待 1 分钟（timer01）',
+    description: '审批后固定等待 PT1M，再进入第二个审批节点。',
+    sourceProcessDefinitionId: 'timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae',
+    model: {
+      processId: 'timer01', processName: '定时器1分钟',
+      nodes: nodes([
+        { id: 'start_1', type: 'start', name: '开始', x: 320, y: 40 },
+        { id: 'approval_1', type: 'approval', name: '审批', x: 320, y: 170 },
+        { id: 'timer_1', type: 'timer', name: '定时等待', timerType: 'duration', timerValue: 'PT1M', x: 320, y: 300 },
+        { id: 'approval_2', type: 'approval', name: '审批', x: 320, y: 430 },
+        { id: 'end', type: 'end', name: '结束', x: 320, y: 560 },
+      ]),
+      flows: flows([
+        { source: 'start_1', target: 'approval_1' },
+        { source: 'approval_1', target: 'timer_1' },
+        { source: 'timer_1', target: 'approval_2' },
+        { source: 'approval_2', target: 'end' },
       ]),
     },
   },

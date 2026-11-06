@@ -1,6 +1,24 @@
 import type { WorkflowModel, WorkflowNodeRecord, WorkflowValidationIssue } from './types'
 import { workflowIssues } from './contract'
 
+const ISO_DURATION = /^P(?=\d|T\d)(?:\d+(?:\.\d+)?Y)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?W)?(?:\d+(?:\.\d+)?D)?(?:T(?=\d)(?:\d+(?:\.\d+)?H)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?S)?)?$/
+const ISO_REPEAT = /^R\d*\/P(?=\d|T\d)(?:\d+(?:\.\d+)?Y)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?W)?(?:\d+(?:\.\d+)?D)?(?:T(?=\d)(?:\d+(?:\.\d+)?H)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?S)?)?$/
+
+function validIsoDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):?(\d{2}))?$/.exec(value)
+  if (!match) return false
+  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) return false
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59 || Number(offsetHour ?? 0) > 23 || Number(offsetMinute ?? 0) > 59) return false
+  return Number.isFinite(Date.parse(value))
+}
+
+function validCron(value: string) {
+  const fields = value.trim().split(/\s+/)
+  return (fields.length === 5 || fields.length === 6) && fields.every(field => /^[\w*/?,#LWa-zA-Z-]+$/.test(field))
+}
+
 export function validateWorkflowModel(model: WorkflowModel, custom: WorkflowValidationIssue[] = []): WorkflowValidationIssue[] {
   const nodeNames = new Map(model.nodes.map(node => [node.id, node.name || node.id]))
   const base = workflowIssues(model, custom)
@@ -17,8 +35,7 @@ export function validateWorkflowModel(model: WorkflowModel, custom: WorkflowVali
       }
       if (reminder.duration !== undefined && reminder.duration !== '') {
         const duration = typeof reminder.duration === 'string' ? reminder.duration.trim() : ''
-        const isoDuration = /^P(?=\d|T\d)(?:\d+(?:\.\d+)?Y)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?W)?(?:\d+(?:\.\d+)?D)?(?:T(?=\d)(?:\d+(?:\.\d+)?H)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?S)?)?$/
-        if (!isoDuration.test(duration)) base.push({ code: 'reminder-duration', message: '超时时长必须使用 ISO-8601 格式，例如 PT30M、PT2H 或 P1D。', nodeId: node.id })
+        if (!ISO_DURATION.test(duration)) base.push({ code: 'reminder-duration', message: '超时时长必须使用 ISO-8601 格式，例如 PT30M、PT2H 或 P1D。', nodeId: node.id })
       }
       const target = typeof reminder.target === 'string' ? reminder.target.trim() : ''
       if (action === 'return') {
@@ -30,6 +47,18 @@ export function validateWorkflowModel(model: WorkflowModel, custom: WorkflowVali
         }
       } else if (target) {
         base.push({ code: 'reminder-target-unexpected', message: '只有超时处理选择“中断并退回”时才能配置退回目标。', nodeId: node.id })
+      }
+    }
+    if (node.type === 'timer' && typeof node.timerValue === 'string' && node.timerValue.trim()) {
+      const timerType = node.timerType ?? 'duration'
+      const value = node.timerValue.trim()
+      const valid = timerType === 'duration' ? ISO_DURATION.test(value)
+        : timerType === 'date' ? validIsoDateTime(value)
+          : timerType === 'cycle' ? ISO_REPEAT.test(value) || validCron(value)
+            : false
+      if (!valid) {
+        const formats = { duration: 'ISO-8601 时长，例如 PT30M 或 P1D', date: 'ISO-8601 日期时间，例如 2026-12-31T23:59:59', cycle: 'ISO-8601 重复间隔（如 R3/PT10H）或 5/6 段 cron 表达式' }
+        base.push({ code: 'timer-value-format', message: `定时时间格式不符合${formats[timerType as keyof typeof formats] ?? '当前等待条件'}。`, nodeId: node.id })
       }
     }
     if (node.type === 'countersign' && node.approveMode === 'VOTE' && !(typeof node.passRate === 'string' && node.passRate.trim())) {

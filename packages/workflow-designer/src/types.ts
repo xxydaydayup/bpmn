@@ -1,6 +1,6 @@
 import type { Component, CSSProperties } from 'vue'
 
-export type WorkflowNodeType = 'start' | 'approval' | 'countersign' | 'service' | 'condition' | 'end'
+export type WorkflowNodeType = 'start' | 'approval' | 'countersign' | 'service' | 'receive' | 'timer' | 'condition' | 'end'
 export type WorkflowBranch = 'pass' | 'reject'
 export type WorkflowNodeRecord = Record<string, unknown> & {
   id: string
@@ -9,6 +9,9 @@ export type WorkflowNodeRecord = Record<string, unknown> & {
   x: number
   y: number
   form?: string
+  messageName?: string
+  timerType?: 'duration' | 'date' | 'cycle'
+  timerValue?: string
   sequential?: boolean
   reminder?: { duration?: string; action?: 'notify' | 'return' | 'end'; target?: string; name?: string }
   serviceName?: string

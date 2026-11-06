@@ -4,7 +4,7 @@ import WorkflowDesigner from '../src/WorkflowDesigner.vue'
 import WorkflowEdge from '../src/edges/WorkflowEdge.vue'
 import WorkflowNode from '../src/nodes/WorkflowNode.vue'
 import { followRouteEndpoints } from '../src/edges/route'
-import { toCanvas } from '../src/adapter'
+import { cloneWorkflowModelWithFreshNodeIds, createWorkflowNodeId, normalizeLegacyUuidNodeIds, toCanvas } from '../src/adapter'
 import { layoutWorkflow } from '../src/layout'
 import { workflowTemplates } from '../src/templates'
 import fixture from '../src/fixtures/project-approval.json'
@@ -41,13 +41,94 @@ vi.mock('@vue-flow/core', async () => {
 const validModel = fixture as WorkflowModel
 
 describe('public WorkflowDesigner behavior', () => {
+  it('creates node ids that can be used as Camunda EL variable names', () => {
+    const id = createWorkflowNodeId('approval')
+    const assigneeExpression = `\${${id}_assignee}`
+    expect(id).toMatch(/^approval_[0-9a-f]{32}$/)
+    expect(assigneeExpression).toMatch(/^\$\{[A-Za-z_$][A-Za-z0-9_$]*\}$/)
+  })
+
+  it('shows message wait semantics and edits the optional message name', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const eventGroup = wrapper.findAll('.wfd-library-group').find(group => group.text().includes('流程事件'))!
+    await eventGroup.findAll('button').find(button => button.text().includes('消息等待'))!.trigger('click')
+    const addedId = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.at(-1)!.id
+    expect(addedId).toMatch(/^receive_[0-9a-f]{32}$/)
+    const input = wrapper.get('input[placeholder="留空时使用节点标识"]')
+    expect(wrapper.text()).toContain('消息名')
+    expect(wrapper.text()).toContain('不产生人工待办')
+    await input.setValue('invoice.ready')
+    await input.trigger('change')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.at(-1))
+      .toMatchObject({ type: 'receive', messageName: 'invoice.ready' })
+  })
+
+  it('adds a timer event with a valid default and changes the timer condition with its value', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const eventGroup = wrapper.findAll('.wfd-library-group').find(group => group.text().includes('流程事件'))!
+    await eventGroup.findAll('button').find(button => button.text().includes('定时等待'))!.trigger('click')
+    const vm = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }
+    expect(vm.exportDesign().model.nodes.at(-1)).toMatchObject({ type: 'timer', timerType: 'duration', timerValue: 'PT30M', id: expect.stringMatching(/^timer_[0-9a-f]{32}$/) })
+    const node = vm.exportDesign().model.nodes.at(-1)!
+    expect((wrapper.get('input[placeholder*="PT30M"]').element as HTMLInputElement).value).toBe('PT30M')
+    await wrapper.get('select[aria-label="等待条件"]').setValue('date')
+    await wrapper.vm.$nextTick()
+    expect(vm.exportDesign().model.nodes.find(item => item.id === node.id)).toMatchObject({ timerType: 'date', timerValue: '2026-12-31T23:59:59' })
+  })
+
   it('applies the JSON template from the picker and fits its top-to-bottom graph', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
     await wrapper.findAll('button').find(button => button.text() === '流程模板')!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === '使用模板')!.trigger('click')
     await wrapper.vm.$nextTick()
     expect((wrapper.vm as unknown as { model: WorkflowModel }).model.processId).toBe('serial-approval')
+    const model = (wrapper.vm as unknown as { model: WorkflowModel }).model
+    expect(model.nodes.every(node => /^\w+_[0-9a-f]{32}$/.test(node.id))).toBe(true)
+    const nodeIds = new Set(model.nodes.map(node => node.id))
+    expect(model.flows.every(flow => nodeIds.has(flow.source) && nodeIds.has(flow.target))).toBe(true)
     expect(wrapper.find('[role=dialog][aria-labelledby=wfd-template-title]').exists()).toBe(false)
+  })
+
+  it('remaps node ids in template copies, including flows and node-to-node reminder targets', () => {
+    const source: WorkflowModel = {
+      ...validModel,
+      nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, reminder: { action: 'return', target: 'apply' } } : node),
+    }
+    const copy = cloneWorkflowModelWithFreshNodeIds(source)
+    const copiedApplyId = copy.nodes.find(node => node.name === '立项审批单')!.id
+    const copiedMinister = copy.nodes.find(node => node.name === '部长审批')!
+    expect(copy.nodes.every((node, index) => node.id !== source.nodes[index]?.id)).toBe(true)
+    expect(copiedMinister.reminder?.target).toBe(copiedApplyId)
+    expect(copy.flows.every(flow => copy.nodes.some(node => node.id === flow.source) && copy.nodes.some(node => node.id === flow.target))).toBe(true)
+  })
+
+  it('normalizes persisted UUID ids without breaking flows or reminder targets', () => {
+    const oldId = 'approval_937c1a82-933b-42b4-92a7-ed676c3de0fc'
+    const source: WorkflowModel = {
+      ...validModel,
+      nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, id: oldId, reminder: { action: 'return', target: 'apply' } } : node),
+      flows: validModel.flows.map(flow => ({ ...flow, source: flow.source === 'minister' ? oldId : flow.source, target: flow.target === 'minister' ? oldId : flow.target })),
+    }
+    const normalized = normalizeLegacyUuidNodeIds(source)
+    const newId = 'approval_937c1a82933b42b492a7ed676c3de0fc'
+    expect(normalized.nodes.some(node => node.id === oldId)).toBe(false)
+    expect(normalized.nodes.find(node => node.name === '部长审批')).toMatchObject({ id: newId, reminder: { target: 'apply' } })
+    expect(normalized.flows.some(flow => flow.source === oldId || flow.target === oldId)).toBe(false)
+    expect(normalized.flows.some(flow => flow.source === newId || flow.target === newId)).toBe(true)
+  })
+
+  it('normalizes persisted UUID ids when loading a model into the designer', () => {
+    const oldId = 'approval_937c1a82-933b-42b4-92a7-ed676c3de0fc'
+    const source: WorkflowModel = {
+      ...validModel,
+      nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, id: oldId } : node),
+      flows: validModel.flows.map(flow => ({ ...flow, source: flow.source === 'minister' ? oldId : flow.source, target: flow.target === 'minister' ? oldId : flow.target })),
+    }
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: source, compile: vi.fn() } })
+    const exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.nodes.some(node => node.id === oldId)).toBe(false)
+    expect(exported.nodes.some(node => node.id === 'approval_937c1a82933b42b492a7ed676c3de0fc')).toBe(true)
+    expect(exported.flows.every(flow => exported.nodes.some(node => node.id === flow.source) && exported.nodes.some(node => node.id === flow.target))).toBe(true)
   })
 
   it('renders labels on two-point ELK routes using Vue Flow live path coordinates', async () => {
@@ -269,6 +350,42 @@ describe('public WorkflowDesigner behavior', () => {
     expect(exported.model.processId).toBe('vote-approval')
     expect(exported.model.nodes.find(node => node.type === 'countersign')).toMatchObject({ approveMode: 'VOTE', passRate: '0.7', sequential: true })
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ model: { processId: 'vote-approval' } })
+  })
+
+  it('includes the deployed message wait and one-minute timer templates with their runtime settings', () => {
+    const messageWait = workflowTemplates.find(item => item.id === 'msg-wait')!
+    expect(messageWait.sourceProcessDefinitionId).toBe('msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae')
+    expect(messageWait.model.nodes.filter(node => node.type === 'approval')).toHaveLength(2)
+    expect(messageWait.model.nodes.find(node => node.type === 'receive')).toMatchObject({ type: 'receive', messageName: 'msg_wait_name' })
+    expect(messageWait.model.flows).toHaveLength(4)
+
+    const timer = workflowTemplates.find(item => item.id === 'timer01')!
+    expect(timer.sourceProcessDefinitionId).toBe('timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae')
+    expect(timer.model.nodes.filter(node => node.type === 'approval')).toHaveLength(2)
+    expect(timer.model.nodes.find(node => node.type === 'timer')).toMatchObject({ type: 'timer', timerType: 'duration', timerValue: 'PT1M' })
+    expect(timer.model.flows).toHaveLength(4)
+  })
+
+  it('shows the deployed definition ids and applies the message and timer templates', async () => {
+    for (const templateId of ['msg-wait', 'timer01']) {
+      const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+      await wrapper.findAll('button').find(button => button.text() === '流程模板')!.trigger('click')
+      await wrapper.findAll('.wfd-template-option input').find(input => (input.element as HTMLInputElement).value === templateId)!.setValue(true)
+      const template = workflowTemplates.find(item => item.id === templateId)!
+      expect(wrapper.find('.wfd-template-preview').text()).toContain(template.sourceProcessDefinitionId)
+      await wrapper.findAll('button').find(button => button.text() === '使用模板')!.trigger('click')
+      await wrapper.vm.$nextTick()
+      const model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+      expect(model.processId).toBe(templateId)
+      if (templateId === 'msg-wait') {
+        expect(model.nodes.find(node => node.type === 'receive')).toMatchObject({ messageName: 'msg_wait_name' })
+      } else {
+        expect(model.nodes.find(node => node.type === 'timer')).toMatchObject({ timerType: 'duration', timerValue: 'PT1M' })
+      }
+      const nodeIds = new Set(model.nodes.map(node => node.id))
+      expect(model.flows.every(flow => nodeIds.has(flow.source) && nodeIds.has(flow.target))).toBe(true)
+      wrapper.unmount()
+    }
   })
 
   it('can independently collapse and expand the node library and inspector', async () => {

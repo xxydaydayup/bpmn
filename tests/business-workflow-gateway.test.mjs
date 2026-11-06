@@ -57,6 +57,19 @@ test('task template detail and delete follow the Swagger contract', async () => 
   assert.equal(calls[1].url, '/v1/template/leave%2Fapproval')
 })
 
+test('template detail normalizes an omitted BPMN document to an empty string', async () => {
+  const code = compiled.replace(
+    /import \{ request \} from ['"]@\/utils\/request['"];?/,
+    'const request = async () => { throw new Error("Unexpected default request"); };',
+  )
+  const { createBusinessWorkflowGateway } = await import(moduleUrl(code))
+  const gateway = createBusinessWorkflowGateway(async () => ({ data: { templateKey: 'leave', displayJson: { nodes: [] } } }))
+
+  const detail = await gateway.getTemplate('leave')
+  assert.equal(detail.bpmnXml, '')
+  assert.deepEqual(detail.displayJson, { nodes: [] })
+})
+
 test('template listing uses current Swagger path and normalizes backend fields', async () => {
   const calls = []
   const code = compiled.replace(
@@ -88,10 +101,21 @@ test('publishing and starting use current Swagger contracts', async () => {
     publishConfig = config
     return { data: { templateKey: 'leave', templateName: '请假审批' } }
   })
-  const published = await publisher.publishTemplate('<bpmn />', '请假审批')
+  const published = await publisher.publishTemplate('<bpmn />', '请假审批', {
+    templateKey: 'leave',
+    templateName: '请假审批',
+    startable: true,
+    suspended: false,
+    displayJson: { processId: 'leave', nodes: [{ id: 'approval-1', type: 'approval' }] },
+  })
   assert.equal(publishConfig.url, '/v1/template')
   assert.equal(publishConfig.method, 'POST')
   assert.equal(publishConfig.data.get('deployment-name'), '请假审批')
+  assert.equal(publishConfig.data.get('template-key'), 'leave')
+  assert.equal(publishConfig.data.get('template-name'), '请假审批')
+  assert.equal(publishConfig.data.get('startable'), 'true')
+  assert.equal(publishConfig.data.get('suspended'), 'false')
+  assert.deepEqual(JSON.parse(publishConfig.data.get('display-json')), { processId: 'leave', nodes: [{ id: 'approval-1', type: 'approval' }] })
   assert.equal(published.taskKey, 'leave')
   assert.equal(published.taskName, '请假审批')
 

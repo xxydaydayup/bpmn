@@ -6,6 +6,7 @@ import type {
   BusinessUserTask,
   BusinessVariables,
   BusinessWorkflowGateway,
+  PublishTemplateMetadata,
   StartBusinessTaskInput,
   TaskCompletionResult,
   TaskRefuseResult,
@@ -41,11 +42,12 @@ function normalizeTemplate(value: ApiRecord): TaskTemplate {
     ...(Array.isArray(value.globalVariables)
       ? { globalVariables: value.globalVariables.map(item => normalizeTemplateVariable(item as ApiRecord)) }
       : {}),
+    ...(value.displayJson && typeof value.displayJson === 'object' ? { displayJson: value.displayJson as Record<string, unknown> } : {}),
   } as TaskTemplate
 }
 
 function normalizeTemplateDetail(value: ApiRecord): TaskTemplateDetail {
-  return normalizeTemplate(value) as TaskTemplateDetail
+  return { ...normalizeTemplate(value), bpmnXml: typeof value.bpmnXml === 'string' ? value.bpmnXml : '' } as TaskTemplateDetail
 }
 
 function normalizeTemplateDeleteResult(value: ApiRecord): TaskTemplateDeleteResult {
@@ -67,11 +69,24 @@ function safeFilename(value: string) {
 
 export function createBusinessWorkflowGateway(send: WorkflowRequester = request): BusinessWorkflowGateway {
   return {
-    async publishTemplate(xml, deploymentName) {
+    async publishTemplate(xml, deploymentName, metadata?: PublishTemplateMetadata) {
       const form = new FormData()
       const name = deploymentName.trim() || '流程任务模板'
       form.append('deployment-name', name)
       form.append('file', new Blob([xml], { type: 'application/xml' }), safeFilename(name) + '.bpmn')
+      const fields = {
+        templateKey: 'template-key',
+        templateName: 'template-name',
+        startable: 'startable',
+        suspended: 'suspended',
+        displayJson: 'display-json',
+      } as const
+      for (const key of Object.keys(fields) as Array<keyof typeof fields>) {
+        const value = metadata?.[key]
+        if (value !== undefined) {
+          form.append(fields[key], typeof value === 'object' ? JSON.stringify(value) : String(value))
+        }
+      }
       const response = await send<DataResponse<ApiRecord>>({ method: 'POST', url: basePath + '/template', data: form })
       return normalizeTemplate(response.data)
     },

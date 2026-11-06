@@ -61,7 +61,7 @@ pnpm preview    # 预览构建结果
 - Camunda REST 管理台：`/camunda-console` 提供运行总览、部署与定义查询、定义/实例挂起恢复、实例终止、活动树与变量查看、任务与 External Task 查询、Job/Incident 异常查看、历史查询、JSON 导出和 Camunda 用户操作日志；页面直接调用官方 REST，仅用于开发联调。
 - 流程验证工作台：在 `/camunda-validation` 选择串行审批或金额分支审批，自动部署唯一测试版本、启动并完成人工任务、核对历史和断言；默认级联清理测试部署，可按需保留数据。
 - 后端业务流程页：`/workflow-business` 通过 `/api/v1` 浏览任务模板、查看当前模板详情和流程图、删除模板、启动业务任务实例、查询和完成人工任务，并支持将任务退回待重派或重派给指定办理人；开发模式可用 Camunda 状态核对业务返回。
-- 业务流程页按节点类型和阶段生成启动/办理字段。审批、多人审批和服务字段仍以建议表单方式提供；消息等待与定时等待字段会映射到后端约定的全局启动变量并进入真实请求：消息名未模板固定时使用 `{nodeId}_messageName`（后端缺省回退节点 ID），定时时间未固定时使用必填 `{nodeId}_timerValue`。可直接编辑启动变量 JSON，字段与 JSON 保持同步；完成任务变量仍由现有 JSON 编辑器直接提交。
+- 业务流程页按节点类型和阶段生成启动/办理字段，同时保留全局 variables JSON 调试入口。用户可分别选择旧接口的 variables 方式或新接口的按节点映射方式：启动调用 start 或 start_biz，完成当前人工任务调用 complete 或 complete_biz。新方式将节点 ID、类型及字段值放入 nodes，由后端拼接全局变量名；启动时 nodes 与 variables 同名字段以 nodes 为准，完成时只提交当前任务节点。消息等待与定时等待的未固定参数仍使用后端约定的 `{nodeId}_messageName` 和必填 `{nodeId}_timerValue`。
 - Vue 工作流设计器通过宿主编译回调调用 /api/v1/bpmn/json2xml 生成 BPMN XML；“发布任务模板”使用现有 /api/v1/template 业务接口，显示模板版本与部署/流程定义标识。内置流程模板包含后端已部署的 `msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae`（固定消息名 `msg_wait_name`）和 `timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae`（固定等待时长 `PT1M`）。部署时引擎后端从编译产物推导全局变量 params_rules，声明流程进行到某一节点时需要的传参；业务 JSON、params_rules 与启动传参的完整对照示例见 [立项申请示例](./packages/workflow-designer/docs/examples/立项申请/立项申请.js)。它不直接部署到 Camunda 引擎，仍与 /designer 的 BPMN/XML 编辑器和引擎验证发布能力区分。
 - 统一的青绿工作台、Tabler 节点库与快捷操作、人工/服务任务卡片；主题、图标映射可由开发者调整。
 - 导入保留 BPMN 文件中的布局和连线折点；小于主题标准的人工/服务任务只在原中心位置规范化为卡片尺寸，不做整图重排。需要重新整理路径时，点击“整理布局”，操作可一次撤销、重做。

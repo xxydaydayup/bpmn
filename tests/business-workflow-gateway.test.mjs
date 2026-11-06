@@ -34,6 +34,39 @@ test('business task actions follow the Swagger paths and request bodies', async 
   assert.deepEqual(calls[1].data, { userId: 'alice' })
 })
 
+test('node-mapped start and completion use the business endpoints and preserve typed fields', async () => {
+  const calls = []
+  const code = compiled.replace(
+    /import \{ request \} from ['"]@\/utils\/request['"];?/,
+    'const request = async () => { throw new Error("Unexpected default request"); };',
+  )
+  const { createBusinessWorkflowGateway } = await import(moduleUrl(code))
+  const gateway = createBusinessWorkflowGateway(async config => {
+    calls.push(config)
+    return config.url.includes('start_biz')
+      ? { data: { id: 4, templateKey: 'leave', templateName: '请假审批', templateId: 3, businessKey: 'leave-1', processInstanceId: 'instance-1' } }
+      : { data: { taskId: 'task/1', status: 'completed' } }
+  })
+  const nodes = [{ nodeId: 'approval_1', nodeType: 'approval', fields: { assignee: 'alice', approved: true, approverList: ['bob'] } }]
+
+  const instance = await gateway.startTaskInstanceByNode({
+    taskKey: 'leave', businessKey: 'leave-1', variables: { source: 'manual', approval_1_assignee: 'old-value' }, nodes,
+  })
+  const completed = await gateway.completeTaskByNode('task/1', { nodes })
+
+  assert.equal(calls[0].method, 'POST')
+  assert.equal(calls[0].url, '/v1/task/instances/start_biz')
+  assert.deepEqual(calls[0].data, {
+    templateKey: 'leave', businessKey: 'leave-1', variables: { source: 'manual', approval_1_assignee: 'old-value' }, nodes,
+  })
+  assert.equal(instance.taskKey, 'leave')
+  assert.equal(instance.taskTemplateId, 3)
+  assert.equal(calls[1].method, 'POST')
+  assert.equal(calls[1].url, '/v1/tasks/task%2F1/complete_biz')
+  assert.deepEqual(calls[1].data, { nodes })
+  assert.deepEqual(completed, { taskId: 'task/1', status: 'completed' })
+})
+
 test('task template detail and delete follow the Swagger contract', async () => {
   const calls = []
   const code = compiled.replace(

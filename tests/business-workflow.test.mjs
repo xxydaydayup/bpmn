@@ -484,3 +484,106 @@ test('completion form and JSON are independent, and completion submits only JSON
     scope.stop()
   }
 })
+
+test('node-mapped startup submits node fields while legacy startup keeps its variables contract', async () => {
+  const template = {
+    taskKey: 'node-start', taskName: '按节点启动', startable: true, suspended: false,
+    displayJson: { nodes: [
+      { id: 'approval-1', type: 'approval', name: '部门审批' },
+      { id: 'approval-2', type: 'approval', name: '复核' },
+    ] },
+    globalVariables: [],
+  }
+  const nodeStarts = []
+  const legacyStarts = []
+  const scope = effectScope()
+  const workflow = scope.run(() => useBusinessWorkflow({
+    listTemplates: async () => [template],
+    startTaskInstanceByNode: async input => { nodeStarts.push(input); return { id: 11, processInstanceId: 'node-instance', ...input } },
+    startTaskInstance: async input => { legacyStarts.push(input); return { id: 12, processInstanceId: 'legacy-instance', ...input } },
+  }))
+  try {
+    await workflow.loadTemplates()
+    workflow.businessKey.value = 'node-start-1'
+    workflow.setStartVariablesText('{"unmapped":"keep","approval-1_assignee":"explicit"}')
+    workflow.setStartFormValues({ 'approval-1.assignee': 'alice', 'approval-2.assignee': 'bob' })
+    assert.deepEqual(JSON.parse(workflow.startNodeRequestPreview()), {
+      templateKey: 'node-start', businessKey: 'node-start-1',
+      variables: { unmapped: 'keep', 'approval-1_assignee': 'explicit' },
+      nodes: [
+        { nodeId: 'approval-1', nodeType: 'approval', fields: { assignee: 'alice' } },
+        { nodeId: 'approval-2', nodeType: 'approval', fields: { assignee: 'bob' } },
+      ],
+    })
+    await workflow.startSelectedTemplateByNode()
+    assert.equal(nodeStarts.length, 1)
+    assert.deepEqual(nodeStarts[0].nodes, [
+      { nodeId: 'approval-1', nodeType: 'approval', fields: { assignee: 'alice' } },
+      { nodeId: 'approval-2', nodeType: 'approval', fields: { assignee: 'bob' } },
+    ])
+    assert.deepEqual(nodeStarts[0].variables, { unmapped: 'keep', 'approval-1_assignee': 'explicit' })
+    assert.equal(workflow.lastInstance.value.processInstanceId, 'node-instance')
+    assert.equal(workflow.taskFilter.processInstanceId, 'node-instance')
+
+    await workflow.startSelectedTemplate()
+    assert.equal(legacyStarts.length, 1)
+    assert.deepEqual(legacyStarts[0].variables, { unmapped: 'keep', 'approval-1_assignee': 'explicit' })
+  } finally {
+    workflow.dispose()
+    scope.stop()
+  }
+})
+
+test('node-mapped completion submits only the current task node and keeps its draft on failure', async () => {
+  const template = {
+    taskKey: 'node-complete', taskName: '按节点完成', processDefinitionKey: 'node-complete', processDefinitionId: 'node-complete:1:abc', startable: true, suspended: false,
+    globalVariables: [],
+    displayJson: { nodes: [
+      { id: 'approval-1', name: '部门审批', type: 'approval' },
+      { id: 'approval-2', name: '复核', type: 'approval' },
+    ] },
+  }
+  const task = { id: 'task-node-1', name: '部门审批', assignee: 'alice', taskDefinitionKey: 'approval-1', processDefinitionKey: 'node-complete', processDefinitionId: template.processDefinitionId, processInstanceId: 'instance-1' }
+  const nodeCompletions = []
+  const legacyCompletions = []
+  let taskListCalls = 0
+  const scope = effectScope()
+  const workflow = scope.run(() => useBusinessWorkflow({
+    listTemplates: async () => [template],
+    listTasks: async () => { taskListCalls += 1; return [task] },
+    completeTaskByNode: async (taskId, input) => {
+      nodeCompletions.push({ taskId, input })
+      if (nodeCompletions.length === 1) throw new Error('node endpoint rejected')
+      return { taskId, status: 'completed' }
+    },
+    completeTask: async (taskId, variables) => { legacyCompletions.push({ taskId, variables }) },
+  }))
+  try {
+    await workflow.loadTemplates()
+    workflow.openComplete(task)
+    workflow.setCompleteFormValues({ 'approval-1.approved': true, 'approval-2.approved': false })
+    workflow.setCompleteVariablesText('{broken')
+    assert.deepEqual(JSON.parse(workflow.completeNodeRequestPreview()), {
+      nodes: [{ nodeId: 'approval-1', nodeType: 'approval', fields: { approved: true } }],
+    })
+    await workflow.completeSelectedTaskByNode()
+    assert.deepEqual(nodeCompletions, [{
+      taskId: 'task-node-1',
+      input: { nodes: [{ nodeId: 'approval-1', nodeType: 'approval', fields: { approved: true } }] },
+    }])
+    assert.equal(legacyCompletions.length, 0)
+    assert.equal(workflow.selectedTask.value.id, 'task-node-1')
+    assert.equal(workflow.completeFormValues.value['approval-1.approved'], true)
+    assert.equal(workflow.completeVariablesText.value, '{broken')
+    assert.equal(workflow.error.value, 'node endpoint rejected')
+
+    await workflow.completeSelectedTaskByNode()
+    assert.equal(workflow.selectedTask.value, undefined)
+    assert.equal(workflow.notice.value, '任务已完成')
+    assert.equal(taskListCalls, 1)
+    assert.equal(legacyCompletions.length, 0)
+  } finally {
+    workflow.dispose()
+    scope.stop()
+  }
+})

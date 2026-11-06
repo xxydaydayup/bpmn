@@ -16,7 +16,7 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 流程画完后，从业务 JSON 到引擎部署的链路是：业务 JSON → 后端编译为 Camunda 标准 XML → 部署 → params_rules。
 
-1. 设计器把画布导出为约定好的业务 JSON（如 `project_approval_json`）：节点含 id、type、name 和 x/y 坐标，连线可带 branch。
+1. 设计器把画布导出为约定好的业务 JSON（如 `project_approval_json`）：节点含 id、type、name 和 x/y 坐标，连线可带 branch。新建节点使用 `节点类型_32位UUID` 标识，例如 `approval_937c1a82933b42b492a7ed676c3de0fc`；UUID 不含连字符，以便后端按节点标识生成的 Camunda EL 变量名（如 `${approval_..._assignee}`）保持合法。导入旧版 `节点类型_UUID` 标识时会自动移除 UUID 连字符，并同步更新连线和节点间引用。
 2. 宿主 compile 回调把业务 JSON 提交后端 `/v1/bpmn/json2xml`，编译为 Camunda 标准 BPMN XML（如 `docs/examples/立项申请/立项申请.bpmn`）。
 3. 宿主 deploy 回调发布任务模板，由后端部署到流程引擎。部署时引擎后端从编译产物推导全局变量 `params_rules`，确定流程进行到某一节点时需要的传参。变量名按节点标识与属性扩充生成（如 `apply_assignee`、`managers_approverList`）。每条规则包含 `name`、`type`、`description`、`value`、`source`、`required`，并带有 `nodeId`、`nodeName`、`nodeType` 三个节点元数据：分别是所属节点的标识、显示名称和业务类型；它们用于说明变量对应哪个节点，不是流程启动时要提交的变量值。`source` 分三类：
    - `start`：启动流程实例时传入，如办理人、会签名单；
@@ -24,11 +24,13 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
    - `engine`：流程定义已固化，无需传入，如会签审批模式。
 4. 启动流程时根据 `params_rules` 中 `source: 'start'` 的规则组装 `variables`，连同业务键等提交启动接口；`nodeId`、`nodeName`、`nodeType` 等规则元数据不放入 `variables`。
 
-`docs/examples/立项申请/` 是该链路的完整对照示例：`立项申请.js` 含业务 JSON、params_rules 与启动传参 start_payload，`立项申请.bpmn` 是后端编译产物，`立项申请流程图.png` 为流程图截图。
+`docs/examples/立项申请/` 是该链路的完整对照示例：`立项申请.js` 含业务 JSON、params_rules 与启动传参 start_payload，`立项申请.bpmn` 是后端编译产物，`立项申请流程图.png` 为流程图截图。内置流程模板还包括后端已部署的 `msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae`（固定消息名 `msg_wait_name`）和 `timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae`（固定等待时长 `PT1M`）。模板选择器会显示这两个来源流程定义；应用时复制节点及连线并重新生成节点标识。
 
 服务节点可选择启用 `countersign: true` 的多服务调用，并在节点业务 JSON 上配置 `approveMode`（ALL / ANY / VOTE）、`sequential`（缺省 false，即并行）和 VOTE 专用 `passRate`。`serviceName` 与 `serviceUrl` 仍是旧单服务配置，并可作为多服务清单项目的缺省值；具体服务集合属于流程实例启动输入，不保存在设计稿中。未带 `countersign` 的旧服务节点保持单服务语义。
 
 审批和多人审批节点可配置 `reminder` 超时策略：`action` 支持 `notify`（到期发送提醒并继续等待，缺省）、`return`（中断当前审批并退回 `target` 节点）和 `end`（中断当前审批并结束流程）；退回目标必须是流程中其他审批、多人审批或服务节点。`duration` 填入 ISO-8601 时长后固化为流程配置，留空时可在启动变量中传 `{节点id}_reminderDuration`，后端缺省为 `P1D`。`name` 用作提醒文案。超时派生节点由后端编译器生成，不进入前端画布。
+
+消息等待节点使用 `type: 'receive'` 与可选 `messageName`。消息名填写后由后端固化到流程模板；留空则业务流程启动表单提供 `{节点id}_messageName`，仍留空时后端回退到节点 ID。节点到达后等待业务方通过消息接口发送匹配消息再继续，不创建人工待办。定时等待节点使用 `type: 'timer'`、`timerType`（`duration` / `date` / `cycle`）和可选 `timerValue`；新节点默认为 `duration` + `PT30M`，切换类型会更新相应格式的示例。时间值留空时业务启动表单要求填写 `{节点id}_timerValue`；引擎到期自动继续，不创建人工待办。启动表单值映射到真实 `variables` 请求，同时可在启动变量 JSON 中编辑。
 
 ## 扩展能力
 

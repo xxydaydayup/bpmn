@@ -102,6 +102,20 @@ export interface StartBusinessTaskInput {
   predecessorConstraint?: boolean
 }
 
+export interface NodeVariable {
+  nodeId: string
+  nodeType: string
+  fields: BusinessVariables
+}
+
+export interface StartBusinessTaskByNodeInput extends StartBusinessTaskInput {
+  nodes: NodeVariable[]
+}
+
+export interface CompleteBusinessTaskByNodeInput {
+  nodes: NodeVariable[]
+}
+
 export interface BusinessUserTask {
   id: string
   name?: string
@@ -169,8 +183,10 @@ export interface BusinessWorkflowGateway {
   getTemplate(taskKey: string, signal?: AbortSignal): Promise<TaskTemplateDetail>
   deleteTemplate(taskKey: string): Promise<TaskTemplateDeleteResult>
   startTaskInstance(input: StartBusinessTaskInput): Promise<BusinessTaskInstance>
+  startTaskInstanceByNode(input: StartBusinessTaskByNodeInput): Promise<BusinessTaskInstance>
   listTasks(query?: BusinessTaskQuery, signal?: AbortSignal): Promise<BusinessUserTask[]>
   completeTask(taskId: string, variables?: BusinessVariables): Promise<TaskCompletionResult>
+  completeTaskByNode(taskId: string, input: CompleteBusinessTaskByNodeInput): Promise<TaskCompletionResult>
   refuseTask(taskId: string): Promise<TaskRefuseResult>
   reassignTask(taskId: string, userId: string): Promise<TaskReassignResult>
 }

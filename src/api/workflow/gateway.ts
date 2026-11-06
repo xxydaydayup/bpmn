@@ -6,7 +6,9 @@ import type {
   BusinessUserTask,
   BusinessVariables,
   BusinessWorkflowGateway,
+  CompleteBusinessTaskByNodeInput,
   PublishTemplateMetadata,
+  StartBusinessTaskByNodeInput,
   StartBusinessTaskInput,
   TaskCompletionResult,
   TaskRefuseResult,
@@ -116,6 +118,16 @@ export function createBusinessWorkflowGateway(send: WorkflowRequester = request)
       return normalizeTaskInstance(response.data)
     },
 
+    async startTaskInstanceByNode(input: StartBusinessTaskByNodeInput) {
+      const { taskKey, ...rest } = input
+      const response = await send<DataResponse<ApiRecord>>({
+        method: 'POST',
+        url: basePath + '/task/instances/start_biz',
+        data: { templateKey: taskKey, ...rest },
+      })
+      return normalizeTaskInstance(response.data)
+    },
+
     async listTasks(query?: BusinessTaskQuery, signal?: AbortSignal) {
       const response = await send<DataResponse<BusinessUserTask[]>>({ method: 'GET', url: basePath + '/tasks', params: query, signal })
       return response.data
@@ -126,6 +138,15 @@ export function createBusinessWorkflowGateway(send: WorkflowRequester = request)
         method: 'POST',
         url: basePath + '/tasks/' + pathSegment(taskId) + '/complete',
         data: { variables },
+      })
+      return response.data
+    },
+
+    async completeTaskByNode(taskId: string, input: CompleteBusinessTaskByNodeInput) {
+      const response = await send<DataResponse<TaskCompletionResult>>({
+        method: 'POST',
+        url: basePath + '/tasks/' + pathSegment(taskId) + '/complete_biz',
+        data: input,
       })
       return response.data
     },

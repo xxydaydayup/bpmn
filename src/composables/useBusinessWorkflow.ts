@@ -8,6 +8,7 @@ import type {
   BusinessUserTask,
   BusinessVariables,
   BusinessWorkflowGateway,
+  NodeVariable,
   TaskTemplate,
   TaskTemplateDetail,
 } from '@/api/workflow/types'
@@ -110,6 +111,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
   const canStart = computed(() => !!selectedTemplate.value && selectedTemplate.value.startable
     && !selectedTemplate.value.suspended && !!businessKey.value.trim() && !starting.value
     && !startJsonError.value && !Object.keys(startEventFieldErrors.value).length)
+  const canStartByNode = computed(() => canStart.value && !Object.keys(startFieldErrors.value).length)
 
   function startRequestPreview() {
     const template = selectedTemplate.value
@@ -122,6 +124,40 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
       templateKey: template.taskKey,
       businessKey: businessKey.value.trim(),
       variables,
+    }, null, 2)
+  }
+
+  function nodeVariables(configs: ReturnType<typeof buildNodeFormConfigs>, values: BusinessVariables): NodeVariable[] {
+    return configs.flatMap(config => {
+      const fields = Object.fromEntries(config.fields.flatMap(field => {
+        const value = values[formValueKey(config.nodeId, field.key)]
+        const empty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
+        return empty ? [] : [[field.key, value]]
+      }))
+      return Object.keys(fields).length ? [{ nodeId: config.nodeId, nodeType: config.nodeType, fields }] : []
+    })
+  }
+
+  function completeNodeVariables() {
+    return completeNodes.value.map(node => {
+      const config = completeFormConfigs.value.find(item => item.nodeId === node.id)
+      const fields = config ? nodeVariables([config], completeFormValues.value)[0]?.fields ?? {} : {}
+      return { nodeId: node.id, nodeType: node.type, fields }
+    })
+  }
+
+  function startNodeRequestPreview() {
+    const template = selectedTemplate.value
+    if (!template) return '{}'
+    let variables: BusinessVariables
+    try { variables = parseObject(startVariablesText.value, '启动变量') } catch {
+      return JSON.stringify({ templateKey: template.taskKey, businessKey: businessKey.value.trim(), variables: null, nodes: nodeVariables(startFormConfigs.value, startFormValues.value), error: startJsonError.value }, null, 2)
+    }
+    return JSON.stringify({
+      templateKey: template.taskKey,
+      businessKey: businessKey.value.trim(),
+      variables,
+      nodes: nodeVariables(startFormConfigs.value, startFormValues.value),
     }, null, 2)
   }
 
@@ -139,6 +175,10 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     } catch {
       return JSON.stringify({ variables: null, error: completeJsonError.value }, null, 2)
     }
+  }
+
+  function completeNodeRequestPreview() {
+    return JSON.stringify({ nodes: completeNodeVariables() }, null, 2)
   }
 
   function defaultStartVariables() {
@@ -334,7 +374,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     }
   }
 
-  async function startSelectedTemplate() {
+  async function startSelectedTemplateWithNodeMapping(useNodeMapping: boolean) {
     const template = selectedTemplate.value
     error.value = ''
     if (!template) { error.value = '请先选择任务模板'; return }
@@ -348,6 +388,10 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
       return
     }
     startFieldErrors.value = validateFormValues(startFormConfigs.value, startFormValues.value, templateDisplayNodes.value)
+    if (useNodeMapping && Object.keys(startFieldErrors.value).length) {
+      error.value = Object.values(startFieldErrors.value)[0]
+      return
+    }
     if (Object.keys(startEventFieldErrors.value).length) {
       error.value = Object.values(startEventFieldErrors.value)[0]
       return
@@ -360,13 +404,23 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
         businessKey: businessKey.value.trim(),
         variables,
       }
-      lastInstance.value = await gateway.startTaskInstance(input)
+      lastInstance.value = useNodeMapping
+        ? await gateway.startTaskInstanceByNode({ ...input, nodes: nodeVariables(startFormConfigs.value, startFormValues.value) })
+        : await gateway.startTaskInstance(input)
       taskFilter.processInstanceId = lastInstance.value.processInstanceId
     } catch (cause) {
       error.value = errorMessage(cause, '业务任务实例启动失败')
     } finally {
       starting.value = false
     }
+  }
+
+  function startSelectedTemplate() {
+    return startSelectedTemplateWithNodeMapping(false)
+  }
+
+  function startSelectedTemplateByNode() {
+    return startSelectedTemplateWithNodeMapping(true)
   }
 
   function taskQuery(): BusinessTaskQuery {
@@ -436,15 +490,24 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     error.value = errorMessage(cause, fallback)
   }
 
-  async function completeSelectedTask() {
+  async function completeSelectedTaskWithNodeMapping(useNodeMapping: boolean) {
     const task = selectedTask.value
     if (!task || completing.value || taskBusy(task.id)) return
-    let variables: BusinessVariables
-    try { variables = parseObject(completeVariablesText.value, '完成变量') } catch (cause) {
-      const message = cause instanceof SyntaxError ? '变量 JSON 格式错误，请输入有效 JSON 对象' : cause instanceof Error ? cause.message : '完成变量格式错误'
-      completeJsonError.value = message
-      error.value = message
-      return
+    let variables: BusinessVariables = {}
+    if (!useNodeMapping) {
+      try { variables = parseObject(completeVariablesText.value, '完成变量') } catch (cause) {
+        const message = cause instanceof SyntaxError ? '变量 JSON 格式错误，请输入有效 JSON 对象' : cause instanceof Error ? cause.message : '完成变量格式错误'
+        completeJsonError.value = message
+        error.value = message
+        return
+      }
+    }
+    if (useNodeMapping) {
+      completeFieldErrors.value = validateFormValues(completeFormConfigs.value, completeFormValues.value, completeNodes.value)
+      if (Object.keys(completeFieldErrors.value).length) {
+        error.value = Object.values(completeFieldErrors.value)[0]
+        return
+      }
     }
     const taskId = task.id
     beginTaskAction(taskId, 'complete')
@@ -452,7 +515,11 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     error.value = ''
     notice.value = ''
     try {
-      await gateway.completeTask(taskId, variables)
+      if (useNodeMapping) {
+        await gateway.completeTaskByNode(taskId, { nodes: completeNodeVariables() })
+      } else {
+        await gateway.completeTask(taskId, variables)
+      }
       selectedTask.value = undefined
       const loaded = await loadTasks()
       notice.value = loaded ? '任务已完成' : '任务已完成，但任务列表刷新失败，请手动刷新'
@@ -462,6 +529,14 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
       completing.value = false
       endTaskAction(taskId)
     }
+  }
+
+  function completeSelectedTask() {
+    return completeSelectedTaskWithNodeMapping(false)
+  }
+
+  function completeSelectedTaskByNode() {
+    return completeSelectedTaskWithNodeMapping(true)
   }
 
   function openReassign(task: BusinessUserTask) {
@@ -558,7 +633,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     startFieldErrors, startEventFieldErrors, completeFieldErrors, startFormConfigs, completeFormConfigs, selectedTaskTemplate,
     reassignUserId, error, notice,
     templateLoading, templateDetailLoading, templateMetadataLoading, templateDetail, templateDetailKey, templateDetailError, deletingTemplateKey, starting, taskLoading, completing, reassigning, taskFilter,
-    completeNodes, canStart, startRequestPreview, startFormSuggestionPreview, completeFormSuggestionPreview, completeRequestVariablesPreview, selectTemplate, loadTemplates, loadTemplateDetail, clearTemplateDetail, deleteTemplate, startSelectedTemplate, setStartFormValues, setStartVariablesText,
-    loadTasks, openComplete, completeSelectedTask, setCompleteFormValues, setCompleteVariablesText,
+    completeNodes, canStart, canStartByNode, startRequestPreview, startNodeRequestPreview, startFormSuggestionPreview, completeFormSuggestionPreview, completeRequestVariablesPreview, completeNodeRequestPreview, selectTemplate, loadTemplates, loadTemplateDetail, clearTemplateDetail, deleteTemplate, startSelectedTemplate, startSelectedTemplateByNode, setStartFormValues, setStartVariablesText,
+    loadTasks, openComplete, completeSelectedTask, completeSelectedTaskByNode, setCompleteFormValues, setCompleteVariablesText,
     openReassign, closeReassign, reassignSelectedTask, refuseTask, taskBusy, taskActionLoading, resetTaskFilters, dispose }
 }

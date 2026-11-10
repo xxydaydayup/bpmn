@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { VueFlow, useVueFlow, type Connection, type NodeMouseEvent, type EdgeMouseEvent } from '@vue-flow/core'
-import { IconArrowBackUp, IconArrowForwardUp, IconArrowsSplit, IconChecklist, IconClock, IconCloudUpload, IconCode, IconDownload, IconFileImport, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLayoutSidebarRightCollapse, IconLayoutSidebarRightExpand, IconMessage, IconPlayerPlay, IconPlus, IconRobot, IconSquare, IconTemplate, IconUserCheck, IconUsers, IconWand } from '@tabler/icons-vue'
+import { IconArrowBackUp, IconArrowForwardUp, IconChecklist, IconCloudUpload, IconCode, IconDownload, IconFileImport, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLayoutSidebarRightCollapse, IconLayoutSidebarRightExpand, IconPlus, IconTemplate, IconWand } from '@tabler/icons-vue'
 import { createDesignDocument, isWorkflowModel, parseWorkflowInput } from './contract'
 import { templateIcons } from './icons'
 import { cloneWorkflowModelWithFreshNodeIds, createNodeRecord, createWorkflowNodeId, fromCanvas, normalizeLegacyUuidNodeIds, toCanvas, type DesignerEdge, type DesignerNode } from './adapter'
@@ -9,18 +9,15 @@ import { canConnectNodes, validateWorkflowModel } from './validation'
 import { layoutWorkflow, refreshFeedbackRoutes } from './layout'
 import WorkflowNode from './nodes/WorkflowNode.vue'
 import WorkflowEdge from './edges/WorkflowEdge.vue'
+import { getWorkflowNodeDefinition, workflowNodeCatalog } from './nodes'
 import { workflowTemplates } from './templates'
+import { createWorkflowEditSession, type WorkflowEditSnapshot } from './edit-session'
 import type { WorkflowCompile, WorkflowDeploy, WorkflowDesignDocument, WorkflowDesignerExtensions, WorkflowInput, WorkflowModel, WorkflowNodeRecord, WorkflowNodeType, WorkflowValidationIssue, WorkflowVerifyDeployment, WorkflowViewport } from './types'
 import './style.css'
 
 const props = withDefaults(defineProps<{ modelValue?: WorkflowInput; compile?: WorkflowCompile; deploy?: WorkflowDeploy; verifyDeployment?: WorkflowVerifyDeployment; readonly?: boolean; autoLayoutOnInit?: boolean; extensions?: WorkflowDesignerExtensions }>(), { readonly: false, autoLayoutOnInit: false })
 const emit = defineEmits<{ 'update:modelValue': [value: WorkflowDesignDocument | Record<string, unknown>]; 'compile-start': []; 'compile-success': [result: unknown]; 'compile-error': [error: unknown] }>()
-const nodeTypes: { type: WorkflowNodeType; title: string; description: string }[] = [
-  { type: 'start', title: '开始', description: '流程触发入口' }, { type: 'approval', title: '审批', description: '单人办理步骤' },
-  { type: 'countersign', title: '多人审批', description: '多人共同办理' }, { type: 'service', title: '服务调用', description: '调用外部服务' },
-  { type: 'receive', title: '消息等待', description: '收到业务消息后继续' }, { type: 'timer', title: '定时等待', description: '到期后由引擎自动继续' },
-  { type: 'condition', title: '条件分支', description: '按条件选择路径' }, { type: 'end', title: '结束', description: '流程完成' },
-]
+const nodeTypes = workflowNodeCatalog
 const sample: WorkflowModel = {
   processId: 'project-approval', processName: '立项审批',
   nodes: [
@@ -74,8 +71,9 @@ const nodeLibraryCollapsed = ref(false)
 const propertiesPanelCollapsed = ref(false)
 const templateOpen = ref(false)
 const selectedTemplateId = ref(workflowTemplates[0].id)
-const history = ref<string[]>([])
-const historyIndex = ref(-1)
+const editSession = createWorkflowEditSession()
+const historyRevision = ref(0)
+const emittedDocuments = new Set<string>()
 const draggingNodes = ref(false)
 const fileInput = ref<HTMLInputElement>()
 const flowId = 'workflow-designer-' + useId()
@@ -89,7 +87,10 @@ const setViewport = flow.setViewport
 const screenToFlowCoordinate = flow.screenToFlowCoordinate
 const selectedNode = computed(() => nodes.value.find((node: DesignerNode) => node.id === activeNodeId.value))
 const selectedEdge = computed(() => edges.value.find((edge: DesignerEdge) => edge.id === activeEdgeId.value))
-const reminderTargetNodes = computed(() => model.value.nodes.filter(node => node.id !== selectedNode.value?.id && ['approval', 'countersign', 'service'].includes(node.type)))
+const reminderTargetNodes = computed(() => model.value.nodes.filter(node => {
+  const type = getWorkflowNodeDefinition(node.type)?.type
+  return node.id !== selectedNode.value?.id && type && ['approval', 'countersign', 'service'].includes(type)
+}))
 const readonlyMode = computed(() => props.readonly || originalReadonly.value)
 const model = computed(() => fromCanvas(nodes.value, edges.value, baseModel()))
 const allIssues = computed<WorkflowValidationIssue[]>(() => [...issues.value, ...unknownPaths.value.map(path => ({ code: 'unknown-business-data', message: '发现未识别的业务数据（' + path + '），保留原文但禁止编译。' }))])
@@ -106,11 +107,14 @@ const deploySummary = computed(() => {
 })
 const themeVariables = computed(() => Object.fromEntries(Object.entries({ ...(editorState.value.theme ?? {}), ...(props.extensions?.theme ?? {}) }).map(([key, value]) => [key.startsWith('--') ? key : '--wfd-' + key.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase()), value])))
 const nodeOptions = computed(() => nodeTypes.filter(item => (props.extensions?.nodeTypes ?? nodeTypes.map(node => node.type)).includes(item.type)))
-const nodeGroups = computed(() => [
-  { title: '人工与服务', items: nodeOptions.value.filter(item => ['start', 'approval', 'countersign', 'service'].includes(item.type)) },
-  { title: '流程事件', items: nodeOptions.value.filter(item => ['receive', 'timer'].includes(item.type)) },
-  { title: '流程控制', items: nodeOptions.value.filter(item => ['condition', 'end'].includes(item.type)) },
-].filter(group => group.items.length))
+const nodeGroups = computed(() => {
+  const groups = new Map<string, Array<(typeof nodeOptions.value)[number]>>()
+  for (const node of nodeOptions.value) {
+    const category = node.category ?? '其他'
+    groups.set(category, [...(groups.get(category) ?? []), node])
+  }
+  return [...groups].map(([title, items]) => ({ title, items }))
+})
 
 function baseModel(): WorkflowModel { const value = documentState.value as Partial<WorkflowDesignDocument>; return value.model && Array.isArray(value.model.nodes) ? value.model as WorkflowModel : initial.model }
 function currentEditor() {
@@ -125,7 +129,45 @@ function currentDocument(): WorkflowDesignDocument | Record<string, unknown> {
   if (unsupportedEnvelope.value) return documentState.value
   return { ...(documentState.value as Record<string, unknown>), format: 'workflow-designer', version: 1, model: model.value, editor: currentEditor() }
 }
-function snapshot() { return JSON.stringify(currentDocument()) }
+function cloneJson<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
+function editSnapshot(): WorkflowEditSnapshot {
+  return {
+    model: model.value,
+    routes: model.value.flows.map((_, index) => {
+      const points = (edges.value[index]?.data as (typeof edges.value[number]['data'] & { routePoints?: { x: number; y: number }[] }) | undefined)?.routePoints
+      return points?.length ? points : undefined
+    }),
+  }
+}
+function resetHistory() {
+  if (readonlyMode.value || unsupportedEnvelope.value) editSession.reset()
+  else editSession.reset(editSnapshot())
+  historyRevision.value += 1
+}
+function mergeHistoryEnvelope(input: WorkflowInput, snapshot: WorkflowEditSnapshot) {
+  const envelope = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {}
+  const { editor: rawEditor, ...envelopeFields } = envelope
+  const editor = rawEditor && typeof rawEditor === 'object' && !Array.isArray(rawEditor)
+    ? rawEditor as Record<string, unknown>
+    : {}
+  const { routes: _routes, ...editorFields } = editor
+  return {
+    ...envelopeFields,
+    format: 'workflow-designer',
+    version: 1,
+    model: cloneJson(snapshot.model),
+    editor: { ...editorFields, ...editorForHistory(snapshot) },
+  } as WorkflowInput
+}
+function editorForHistory(snapshot: WorkflowEditSnapshot) {
+  const editor = currentEditor()
+  delete editor.routes
+  const routes = Object.fromEntries(snapshot.routes.flatMap((points, index) => points?.length ? [['flow-' + index, cloneJson(points)]] : []))
+  if (Object.keys(routes).length) editor.routes = routes
+  return editor
+}
 function togglePanel(panel: 'library' | 'properties') {
   if (panel === 'library') nodeLibraryCollapsed.value = !nodeLibraryCollapsed.value
   else propertiesPanelCollapsed.value = !propertiesPanelCollapsed.value
@@ -133,35 +175,67 @@ function togglePanel(panel: 'library' | 'properties') {
 function applyDocument(input: WorkflowInput) {
   const parsed = parseWorkflowInput(input); parsed.model = normalizeLegacyUuidNodeIds(parsed.model); const canvas = toCanvas(parsed.model, parsed.editor)
   documentState.value = parsed.document; editorState.value = parsed.editor; nodes.value = canvas.nodes; edges.value = canvas.edges
+  zoom.value = parsed.editor.viewport?.zoom ?? 1
   unknownPaths.value = parsed.unknownPaths; unsupportedEnvelope.value = parsed.unsupportedEnvelope; originalReadonly.value = parsed.readonly
   activeNodeId.value = undefined; activeEdgeId.value = undefined
   issues.value = validateWorkflowModel(parsed.model, props.extensions?.validate?.(parsed.model) ?? [])
   compileState.value = 'idle'; compileResult.value = undefined; compileError.value = ''
   nextTick(() => { if (parsed.editor.viewport) void setViewport(parsed.editor.viewport) })
 }
-watch(() => props.modelValue, value => { if (!loadingInput.value && value !== undefined && JSON.stringify(value) !== snapshot()) applyDocument(value) }, { deep: true })
-function updateDocument() {
+watch(() => props.modelValue, value => {
+  if (loadingInput.value || value === undefined) return
+  const serialized = JSON.stringify(value)
+  if (emittedDocuments.has(serialized)) { emittedDocuments.delete(serialized); return }
+  if (serialized === JSON.stringify(currentDocument())) return
+  const parsed = parseWorkflowInput(value)
+  parsed.model = normalizeLegacyUuidNodeIds(parsed.model)
+  const replacesModel = JSON.stringify(parsed.model) !== JSON.stringify(model.value)
+  applyDocument(value)
+  if (replacesModel) resetHistory()
+}, { deep: true })
+function updateDocument(recordHistory = true) {
   if (loadingInput.value || unsupportedEnvelope.value) return
   documentState.value = { ...(documentState.value as Record<string, unknown>), format: 'workflow-designer', version: 1, model: model.value, editor: currentEditor() }
   issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? [])
   unknownPaths.value = parseWorkflowInput(currentDocument()).unknownPaths
-  compileState.value = 'idle'; compileError.value = ''; emit('update:modelValue', currentDocument())
-  if (!draggingNodes.value) pushHistory()
+  compileState.value = 'idle'; compileError.value = ''; publishDocument()
+  if (recordHistory && !draggingNodes.value) commitHistory()
+}
+function publishDocument() {
+  const value = currentDocument()
+  emittedDocuments.add(JSON.stringify(value))
+  if (emittedDocuments.size > 32) emittedDocuments.delete(emittedDocuments.values().next().value!)
+  emit('update:modelValue', value)
 }
 watch(() => props.extensions?.validate, () => { issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? []) })
 function pushHistory() {
+  if (!editSession.hasBaseline) {
+    editSession.ensureBaseline(editSnapshot())
+    historyRevision.value += 1
+  }
+}
+function commitHistory() {
   if (readonlyMode.value || unsupportedEnvelope.value) return
-  const current = snapshot(); if (historyIndex.value < 0) { history.value = [current]; historyIndex.value = 0; return }
-  history.value = history.value.slice(0, historyIndex.value + 1); if (history.value.at(-1) !== current) history.value.push(current); historyIndex.value = history.value.length - 1
+  editSession.commit(editSnapshot())
+  historyRevision.value += 1
 }
 function restoreHistory(direction: -1 | 1) {
   if (readonlyMode.value) return
-  if (historyIndex.value < 0) pushHistory()
-  const next = historyIndex.value + direction; if (next < 0 || next >= history.value.length) return
-  historyIndex.value = next; loadingInput.value = true; applyDocument(JSON.parse(history.value[next]) as WorkflowInput)
-  nextTick(() => { loadingInput.value = false; emit('update:modelValue', currentDocument()) })
+  if (!editSession.hasBaseline) editSession.ensureBaseline(editSnapshot())
+  const target = direction < 0 ? editSession.undo() : editSession.redo()
+  if (!target) return
+  historyRevision.value += 1
+  const restored = mergeHistoryEnvelope(documentState.value as WorkflowInput, target)
+  loadingInput.value = true; applyDocument(restored)
+  const missingRoutes = new Set(edges.value.filter(edge => !(edge.data as typeof edge.data & { routePoints?: { x: number; y: number }[] } | undefined)?.routePoints?.length).map(edge => edge.id))
+  if (missingRoutes.size) {
+    const dimensions = new Map(flow.getNodes.value.map(node => [node.id, { width: node.dimensions.width, height: node.dimensions.height }]))
+    edges.value = refreshFeedbackRoutes(nodes.value, edges.value, dimensions, missingRoutes)
+  }
+  nextTick(() => { loadingInput.value = false; publishDocument() })
 }
-const canUndo = computed(() => historyIndex.value > 0); const canRedo = computed(() => historyIndex.value >= 0 && historyIndex.value < history.value.length - 1)
+const canUndo = computed(() => { historyRevision.value; return editSession.canUndo })
+const canRedo = computed(() => { historyRevision.value; return editSession.canRedo })
 function undo() { restoreHistory(-1) } function redo() { restoreHistory(1) }
 function getRecord(id: string) { return model.value.nodes.find(item => item.id === id) }
 function updateNode(id: string, key: string, value: unknown) {
@@ -227,7 +301,7 @@ function commitTextInput(event: Event, commit: (value: string) => void) {
 function updateEdge(id: string, key: 'branch' | 'conditionExpression' | 'source' | 'target', value: string) {
   if (readonlyMode.value) return; const edge = edges.value.find(item => item.id === id); if (!edge) return
   edges.value = edges.value.map(item => item.id !== id ? item : key === 'source' || key === 'target'
-    ? { ...item, [key]: value }
+    ? { ...item, [key]: value, data: { ...item.data, routePoints: undefined, feedback: undefined } }
     : { ...item, data: { ...item.data, [key]: value || undefined } })
   updateDocument()
 }
@@ -282,20 +356,21 @@ function onPaneClick() { activeNodeId.value = undefined; activeEdgeId.value = un
 function applyTemplate() {
   const template = workflowTemplates.find(item => item.id === selectedTemplateId.value)
   if (!template || readonlyMode.value) return
+  pushHistory()
   loadingInput.value = true
-  applyDocument(cloneWorkflowModelWithFreshNodeIds(template.model))
-  history.value = []
-  historyIndex.value = -1
+  const nextModel = cloneWorkflowModelWithFreshNodeIds(template.model)
+  const current = currentDocument() as Record<string, unknown>
+  const editor = currentEditor()
+  delete editor.routes
+  applyDocument({ ...current, format: 'workflow-designer', version: 1, model: nextModel, editor } as WorkflowInput)
   templateOpen.value = false
   nextTick(() => {
     loadingInput.value = false
     updateDocument()
-    history.value = [snapshot()]
-    historyIndex.value = 0
     void fitView({ padding: 0.15, duration: 220 })
   })
 }
-watch([nodes, edges, zoom], () => {
+watch([nodes, edges], () => {
   if (!draggingNodes.value) updateDocument()
 })
 const selectedTemplate = computed(() => workflowTemplates.find(item => item.id === selectedTemplateId.value) ?? workflowTemplates[0])
@@ -310,20 +385,21 @@ async function handleFlowInit() {
 }
 async function handleNodesInitialized() {
   if (initialLayoutApplied) return
-  if (!shouldAutoLayoutOnInit || readonlyMode.value || !nodes.value.length) { initialLayoutApplied = true; return }
+  if (!shouldAutoLayoutOnInit || readonlyMode.value || !nodes.value.length) { initialLayoutApplied = true; if (!editSession.hasBaseline) resetHistory(); return }
   const measuredNodes = flow.getNodes.value
   if (!measuredNodes.length || measuredNodes.some(node => !node.dimensions.width || !node.dimensions.height || !node.handleBounds)) return
   initialLayoutApplied = true
   await autoLayout(false)
+  resetHistory()
 }
-async function autoLayout(recordHistory = true) { if (readonlyMode.value || !nodes.value.length) return; viewError.value = ''; if (recordHistory) pushHistory(); try { const dimensions = new Map(flow.getNodes.value.map(node => [node.id, { width: node.dimensions.width, height: node.dimensions.height }])); const result = await layoutWorkflow(nodes.value, edges.value, dimensions); nodes.value = result.nodes; edges.value = result.edges; updateDocument(); await nextTick(); await waitForFlowRender(); await fitView({ padding: 0.12, duration: 260 }) } catch (error) { viewError.value = '自动布局失败：' + String(error) } }
+async function autoLayout(recordHistory = true) { if (readonlyMode.value || !nodes.value.length) return; viewError.value = ''; if (recordHistory) pushHistory(); try { const dimensions = new Map(flow.getNodes.value.map(node => [node.id, { width: node.dimensions.width, height: node.dimensions.height }])); const result = await layoutWorkflow(nodes.value, edges.value, dimensions); nodes.value = result.nodes; edges.value = result.edges; updateDocument(recordHistory); await nextTick(); await waitForFlowRender(); await fitView({ padding: 0.12, duration: 260 }) } catch (error) { viewError.value = '自动布局失败：' + String(error) } }
 function waitForFlowRender() {
   return new Promise<void>(resolve => {
     if (typeof window.requestAnimationFrame !== 'function') { window.setTimeout(resolve, 0); return }
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
   })
 }
-function onViewportChange(event: { flowTransform: WorkflowViewport }) { zoom.value = event.flowTransform.zoom; editorState.value = { ...editorState.value, viewport: event.flowTransform }; updateDocument() }
+function onViewportChange(event: { flowTransform: WorkflowViewport }) { zoom.value = event.flowTransform.zoom; editorState.value = { ...editorState.value, viewport: event.flowTransform }; updateDocument(false) }
 function readBpmnXml(result: unknown) {
   if (typeof result === 'string') return result
   if (!result || typeof result !== 'object') return ''
@@ -347,9 +423,14 @@ function importJsonToCanvas() {
   try {
     const parsed = parseJsonDraft()
     if (parsed.unsupportedEnvelope && !parsed.model.nodes.length) throw new Error('无法识别该设计稿中的业务模型。')
+    if (!parsed.readonly) pushHistory()
     loadingInput.value = true; applyDocument(parsed.document as WorkflowInput); jsonImportOpen.value = false; jsonError.value = ''
-    if (!parsed.readonly) { updateDocument(); pushHistory() }
-    nextTick(() => { loadingInput.value = false; if (parsed.editor.viewport) void setViewport(parsed.editor.viewport); else void fitView({ padding: 0.15, duration: 220 }) })
+    nextTick(() => {
+      loadingInput.value = false
+      if (!parsed.readonly) updateDocument()
+      if (parsed.editor.viewport) void setViewport(parsed.editor.viewport)
+      else void fitView({ padding: 0.15, duration: 220 })
+    })
   } catch (error) { jsonError.value = error instanceof Error ? error.message : String(error) }
 }
 async function compileModel(candidate: WorkflowModel = model.value, openXml = true) {
@@ -434,7 +515,7 @@ function onKeydown(event: KeyboardEvent) {
   else if (!editing && (event.key === 'Delete' || event.key === 'Backspace') && (activeNodeId.value || activeEdgeId.value)) { event.preventDefault(); removeSelection() }
 }
 function safeJson(value: unknown) { return JSON.stringify(value, null, 2) }
-onMounted(() => { document.addEventListener('keydown', onKeydown); issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? []); if (historyIndex.value < 0) pushHistory() })
+onMounted(() => { document.addEventListener('keydown', onKeydown); issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? []); if (!editSession.hasBaseline && !shouldAutoLayoutOnInit) resetHistory() })
 onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 defineExpose({ compile: compileModel, exportDesign: currentDocument })
 </script>
@@ -471,7 +552,7 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument })
         <slot name="toolbar-end" :document="currentDocument()" /><input ref="fileInput" class="wfd-visually-hidden" type="file" accept="application/json,.json" @change="onFileSelected">
       </div>
     </header>
-    <div v-if="templateOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="templateOpen = false"><section class="wfd-dialog wfd-dialog-template" role="dialog" aria-modal="true" aria-labelledby="wfd-template-title"><header><div><h2 id="wfd-template-title">流程模板</h2><p>使用模板会替换当前业务流程与撤销历史；模型由 WorkflowModel JSON 描述。</p></div><button type="button" aria-label="关闭" @click="templateOpen = false">×</button></header><div class="wfd-template-options" role="radiogroup" aria-label="选择流程模板"><label v-for="item in workflowTemplates" :key="item.id" class="wfd-template-option" :class="{ 'is-selected': selectedTemplateId === item.id }"><input v-model="selectedTemplateId" type="radio" name="workflow-template" :value="item.id"><span class="wfd-template-icon" :class="'wfd-tone-' + item.model.nodes[1]?.type" aria-hidden="true" v-html="templateIcons[item.model.nodes[1]?.type === 'countersign' ? 'plus' : item.model.nodes[1]?.type === 'service' ? 'service' : item.model.nodes.some(node => node.type === 'condition') ? 'branch' : 'user']"></span><span class="wfd-template-copy"><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span><span class="wfd-template-mark" aria-hidden="true">{{ selectedTemplateId === item.id ? '✓' : '' }}</span></label></div><div class="wfd-template-preview"><div><span>流程标识</span><code>{{ selectedTemplate.model.processId }}</code></div><div><span>节点 / 连线</span><code>{{ selectedTemplate.model.nodes.length }} / {{ selectedTemplate.model.flows.length }}</code></div><div><span>多人审批</span><code>{{ selectedTemplate.model.nodes.find(node => node.type === 'countersign')?.approveMode ?? '—' }}</code></div><div v-if="selectedTemplate.sourceProcessDefinitionId"><span>来源流程定义</span><code>{{ selectedTemplate.sourceProcessDefinitionId }}</code></div></div><footer><button class="wfd-button" type="button" @click="templateOpen = false">取消</button><button class="wfd-button" type="button" @click="jsonDraft = safeJson(selectedTemplate.model); jsonImportOpen = true; templateOpen = false">查看 JSON</button><button class="wfd-button wfd-button-primary" type="button" :disabled="readonlyMode" @click="applyTemplate">使用模板</button></footer></section></div>
+    <div v-if="templateOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="templateOpen = false"><section class="wfd-dialog wfd-dialog-template" role="dialog" aria-modal="true" aria-labelledby="wfd-template-title"><header><div><h2 id="wfd-template-title">流程模板</h2><p>使用模板会替换当前业务流程，可通过撤销恢复；模型由 WorkflowModel JSON 描述。</p></div><button type="button" aria-label="关闭" @click="templateOpen = false">×</button></header><div class="wfd-template-options" role="radiogroup" aria-label="选择流程模板"><label v-for="item in workflowTemplates" :key="item.id" class="wfd-template-option" :class="{ 'is-selected': selectedTemplateId === item.id }"><input v-model="selectedTemplateId" type="radio" name="workflow-template" :value="item.id"><span class="wfd-template-icon" :class="'wfd-tone-' + item.model.nodes[1]?.type" aria-hidden="true" v-html="templateIcons[item.model.nodes[1]?.type === 'countersign' ? 'plus' : item.model.nodes[1]?.type === 'service' ? 'service' : item.model.nodes.some(node => node.type === 'condition') ? 'branch' : 'user']"></span><span class="wfd-template-copy"><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span><span class="wfd-template-mark" aria-hidden="true">{{ selectedTemplateId === item.id ? '✓' : '' }}</span></label></div><div class="wfd-template-preview"><div><span>流程标识</span><code>{{ selectedTemplate.model.processId }}</code></div><div><span>节点 / 连线</span><code>{{ selectedTemplate.model.nodes.length }} / {{ selectedTemplate.model.flows.length }}</code></div><div><span>多人审批</span><code>{{ selectedTemplate.model.nodes.find(node => node.type === 'countersign')?.approveMode ?? '—' }}</code></div><div v-if="selectedTemplate.sourceProcessDefinitionId"><span>来源流程定义</span><code>{{ selectedTemplate.sourceProcessDefinitionId }}</code></div></div><footer><button class="wfd-button" type="button" @click="templateOpen = false">取消</button><button class="wfd-button" type="button" @click="jsonDraft = safeJson(selectedTemplate.model); jsonImportOpen = true; templateOpen = false">查看 JSON</button><button class="wfd-button wfd-button-primary" type="button" :disabled="readonlyMode" @click="applyTemplate">使用模板</button></footer></section></div>
     <div v-if="jsonViewOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="jsonViewOpen = false"><section class="wfd-dialog" role="dialog" aria-modal="true" aria-labelledby="wfd-json-title"><header><div><h2 id="wfd-json-title">业务模型 JSON</h2><p>当前业务模型；设计稿视口与主题保存在独立信封中。</p></div><button type="button" aria-label="关闭" @click="jsonViewOpen = false">×</button></header><textarea :value="safeJson(model)" readonly aria-label="业务模型 JSON" spellcheck="false"></textarea><footer><button class="wfd-button" type="button" @click="copyText(safeJson(model), 'JSON ')">复制 JSON</button><button class="wfd-button" type="button" @click="downloadJson">下载 JSON</button><button class="wfd-button wfd-button-primary" type="button" @click="jsonViewOpen = false">完成</button></footer></section></div>
     <div v-if="jsonImportOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="jsonImportOpen = false"><section class="wfd-dialog" role="dialog" aria-modal="true" aria-labelledby="wfd-import-title"><header><div><h2 id="wfd-import-title">导入 / 转换业务 JSON</h2><p>粘贴 WorkflowModel v1 或版本化设计稿。导入后可继续编辑，或请求后端转换成 BPMN XML。</p></div><button type="button" aria-label="关闭" @click="jsonImportOpen = false">×</button></header><div class="wfd-dialog-file-row"><span>也可以从文件导入</span><button class="wfd-button" type="button" :disabled="compileState === 'loading'" @click="importFile">选择 JSON 文件</button></div><textarea v-model="jsonDraft" aria-label="业务 JSON" spellcheck="false" :disabled="compileState === 'loading'"></textarea><p v-if="jsonError" class="wfd-dialog-error" role="alert">{{ jsonError }}</p><footer><button class="wfd-button" type="button" @click="jsonImportOpen = false">取消</button><button class="wfd-button" type="button" :disabled="readonlyMode || compileState === 'loading'" @click="importJsonToCanvas">导入到画布</button><button class="wfd-button wfd-button-primary" type="button" :disabled="compileState === 'loading' || !props.compile" @click="convertJsonToXml">{{ compileState === 'loading' ? '转换中…' : '转换为 BPMN XML' }}</button></footer></section></div>
     <div v-if="xmlOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="xmlOpen = false"><section class="wfd-dialog" role="dialog" aria-modal="true" aria-labelledby="wfd-xml-title"><header><div><h2 id="wfd-xml-title">BPMN XML</h2><p>由后端根据当前业务模型生成。</p></div><button type="button" aria-label="关闭" @click="xmlOpen = false">×</button></header><textarea v-model="xmlText" readonly aria-label="BPMN XML" spellcheck="false"></textarea><footer><button class="wfd-button" type="button" @click="copyText(xmlText, 'BPMN XML ')">复制 XML</button><button class="wfd-button" type="button" @click="downloadXml">下载 XML</button><button class="wfd-button wfd-button-primary" type="button" @click="xmlOpen = false">完成</button></footer></section></div>
@@ -482,7 +563,7 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument })
     <div v-if="allIssues.length" class="wfd-validation-summary" role="status"><strong>{{ unknownPaths.length ? '包含未识别数据，编译已禁用' : '流程检查' }}</strong><span>{{ allIssues.length }} 项待处理</span><button v-if="allIssues[0]?.nodeId" type="button" @click="activeNodeId = allIssues[0].nodeId; activeEdgeId = undefined">定位第一项</button></div>
     <div class="wfd-workspace" :class="workspaceClasses">
       <aside class="wfd-library" aria-label="节点库"><div class="wfd-section-heading"><span class="wfd-panel-title">节点库</span><small>点击添加步骤</small><button class="wfd-panel-toggle" type="button" :aria-expanded="!nodeLibraryCollapsed" :aria-label="nodeLibraryCollapsed ? '展开节点库' : '折叠节点库'" :title="nodeLibraryCollapsed ? '展开节点库' : '折叠节点库'" @click="togglePanel('library')"><IconLayoutSidebarLeftCollapse v-if="!nodeLibraryCollapsed" :size="20" aria-hidden="true" /><IconLayoutSidebarLeftExpand v-else :size="20" aria-hidden="true" /></button></div>
-        <section v-for="group in nodeGroups" :key="group.title" class="wfd-library-group"><h3>{{ group.title }}</h3><button v-for="item in group.items" :key="item.type" class="wfd-library-item" type="button" :disabled="readonlyMode" :draggable="!readonlyMode" @dragstart="onLibraryDragStart($event, item.type)" @click="addNode(item.type)"><span class="wfd-library-icon" :class="'wfd-tone-' + item.type" aria-hidden="true"><IconPlayerPlay v-if="item.type === 'start'" :size="17" /><IconUserCheck v-else-if="item.type === 'approval'" :size="17" /><IconUsers v-else-if="item.type === 'countersign'" :size="17" /><IconRobot v-else-if="item.type === 'service'" :size="17" /><IconMessage v-else-if="item.type === 'receive'" :size="17" /><IconClock v-else-if="item.type === 'timer'" :size="17" /><IconArrowsSplit v-else-if="item.type === 'condition'" :size="17" /><IconSquare v-else :size="17" /></span><span><strong>{{ item.title }}</strong><small>{{ item.description }}</small></span><IconPlus class="wfd-plus" :size="16" aria-hidden="true" /></button></section>
+        <section v-for="group in nodeGroups" :key="group.title" class="wfd-library-group"><h3>{{ group.title }}</h3><button v-for="item in group.items" :key="item.type" class="wfd-library-item" type="button" :disabled="readonlyMode" :draggable="!readonlyMode" @dragstart="onLibraryDragStart($event, item.type)" @click="addNode(item.type)"><span class="wfd-library-icon" :class="'wfd-tone-' + item.type" aria-hidden="true"><component :is="item.icon" :size="17" /></span><span><strong>{{ item.title }}</strong><small>{{ item.description }}</small></span><IconPlus class="wfd-plus" :size="16" aria-hidden="true" /></button></section>
         <slot name="node-library-footer" />
       </aside>
       <main class="wfd-canvas-wrap" aria-label="流程画布" @dragover.prevent @drop.prevent="onCanvasDrop">
@@ -494,7 +575,7 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument })
         <div class="wfd-canvas-actions"><button type="button" aria-label="缩小" title="缩小" @click="zoomOut()">−</button><span>{{ Math.round(zoom * 100) }}%</span><button type="button" aria-label="放大" title="放大" @click="zoomIn()">+</button><i /><button type="button" aria-label="适应画布" title="适应画布" @click="fitView({ padding: 0.18 })">适应</button></div><slot name="canvas-overlay" :issues="allIssues" />
       </main>
       <aside class="wfd-inspector" aria-label="属性面板"><div class="wfd-section-heading"><button class="wfd-panel-toggle" type="button" :aria-expanded="!propertiesPanelCollapsed" :aria-label="propertiesPanelCollapsed ? '展开属性面板' : '折叠属性面板'" :title="propertiesPanelCollapsed ? '展开属性面板' : '折叠属性面板'" @click="togglePanel('properties')"><IconLayoutSidebarRightCollapse v-if="!propertiesPanelCollapsed" :size="20" aria-hidden="true" /><IconLayoutSidebarRightExpand v-else :size="20" aria-hidden="true" /></button><span class="wfd-panel-title">{{ selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '流程属性' }}</span><button v-if="(selectedNode || selectedEdge) && !readonlyMode" class="wfd-text-danger" type="button" @click="removeSelection">删除</button></div>
-        <template v-if="selectedNode"><div class="wfd-selected-kind"><span class="wfd-library-icon" :class="'wfd-tone-' + selectedNode.data.kind" aria-hidden="true"><IconPlayerPlay v-if="selectedNode.data.kind === 'start'" :size="17" /><IconUserCheck v-else-if="selectedNode.data.kind === 'approval'" :size="17" /><IconUsers v-else-if="selectedNode.data.kind === 'countersign'" :size="17" /><IconRobot v-else-if="selectedNode.data.kind === 'service'" :size="17" /><IconMessage v-else-if="selectedNode.data.kind === 'receive'" :size="17" /><IconClock v-else-if="selectedNode.data.kind === 'timer'" :size="17" /><IconArrowsSplit v-else-if="selectedNode.data.kind === 'condition'" :size="17" /><IconSquare v-else :size="17" /></span><span><strong>{{ nodeTypes.find(item => item.type === selectedNode?.data.kind)?.title ?? '未知节点' }}</strong><small>{{ selectedNode.id }}</small></span></div>
+          <template v-if="selectedNode"><div class="wfd-selected-kind"><span class="wfd-library-icon" :class="'wfd-tone-' + selectedNode.data.kind" aria-hidden="true"><component :is="props.extensions?.nodeComponent ? undefined : nodeTypes.find(item => item.type === selectedNode?.data.kind)?.icon" :size="17" /></span><span><strong>{{ nodeTypes.find(item => item.type === selectedNode?.data.kind)?.title ?? '未知节点' }}</strong><small>{{ selectedNode.id }}</small></span></div>
           <component v-if="props.extensions?.nodePropertyEditors?.[selectedNode.data.kind as WorkflowNodeType]" :is="props.extensions.nodePropertyEditors[selectedNode.data.kind as WorkflowNodeType]" :model="getRecord(selectedNode.id)" :readonly="readonlyMode" :update="(key: string, value: unknown) => updateNode(selectedNode!.id, key, value)" />
           <template v-else-if="nodeTypes.some(item => item.type === selectedNode?.data.kind)">
             <label class="wfd-field"><span>节点名称</span><input :value="selectedNode.data.name" :disabled="readonlyMode" @focus="pushHistory" @change="commitTextInput($event, value => updateNode(selectedNode!.id, 'name', value))"></label>

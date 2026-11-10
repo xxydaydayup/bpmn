@@ -6,6 +6,7 @@
   --color-wfd-ink: #193d36;
   --color-wfd-muted: #71847d;
 }
+@source "./";
 
 .wfd {
   --wfd-accent: #256b58;

@@ -1,5 +1,6 @@
 import { MarkerType, type Edge, type Node } from '@vue-flow/core'
 import type { WorkflowEditorState, WorkflowFlowRecord, WorkflowModel, WorkflowNodeRecord, WorkflowNodeType } from './types'
+import { getWorkflowNodeDefinition, isWorkflowNodeType } from './nodes'
 
 export interface DesignerNodeData {
   kind: string
@@ -81,7 +82,7 @@ export function normalizeLegacyUuidNodeIds(model: WorkflowModel): WorkflowModel 
 export function toCanvas(model: WorkflowModel, editor: WorkflowEditorState = {}): { nodes: DesignerNode[]; edges: DesignerEdge[] } {
   const nodes = model.nodes.map(node => {
     const { id, type, name, x, y, ...rest } = node
-    const supported = ['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'end'].includes(type)
+    const supported = isWorkflowNodeType(type)
     return { id, type: 'workflowNode', position: { x, y }, data: { kind: type, name, original: node, custom: rest }, draggable: supported, connectable: supported } as DesignerNode
   })
   const edges = model.flows.map((flow, index) => {
@@ -123,8 +124,7 @@ export function fromCanvas(nodes: DesignerNode[], edges: DesignerEdge[], model: 
 }
 
 export function createNodeRecord(type: WorkflowNodeType, id: string, x: number, y: number, defaults: Partial<WorkflowNodeRecord> = {}): WorkflowNodeRecord {
-  const names: Record<WorkflowNodeType, string> = { start: '开始', approval: '审批', countersign: '多人审批', service: '服务调用', receive: '消息等待', timer: '定时等待', condition: '条件分支', end: '结束' }
+  const definition = getWorkflowNodeDefinition(type)
   const safeDefaults = Object.fromEntries(Object.entries(defaults).filter(([key]) => !['id', 'type', 'x', 'y'].includes(key))) as Partial<WorkflowNodeRecord>
-  // Match the React designer default while allowing the property editor to clear it for start-time selection.
-  return { id, type, name: names[type], x, y, ...(type === 'countersign' ? { approveMode: 'ALL', sequential: false } : {}), ...(type === 'timer' ? { timerType: 'duration', timerValue: 'PT30M' } : {}), ...safeDefaults }
+  return { id, type, name: definition?.defaultValue?.name ?? definition?.title ?? type, x, y, ...definition?.defaultValue, ...safeDefaults }
 }

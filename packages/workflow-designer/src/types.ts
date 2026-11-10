@@ -1,6 +1,7 @@
 import type { Component, CSSProperties } from 'vue'
+import type { WorkflowNodeType } from './nodes/node-types'
 
-export type WorkflowNodeType = 'start' | 'approval' | 'countersign' | 'service' | 'receive' | 'timer' | 'condition' | 'end'
+export type { WorkflowNodeType } from './nodes/node-types'
 export type WorkflowBranch = 'pass' | 'reject'
 export type WorkflowNodeRecord = Record<string, unknown> & {
   id: string

@@ -1,6 +1,7 @@
 import type { WorkflowDesignDocument, WorkflowEditorState, WorkflowInput, WorkflowModel, WorkflowValidationIssue } from './types'
+import { getWorkflowNodeDefinition, isWorkflowNodeType } from './nodes'
+export { WORKFLOW_NODE_TYPES } from './nodes'
 
-export const WORKFLOW_NODE_TYPES = ['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'end'] as const
 const MODEL_KEYS = new Set(['processId', 'processName', 'nodes', 'flows'])
 const NODE_KEYS = new Set(['id', 'type', 'name', 'x', 'y', 'form', 'messageName', 'timerType', 'timerValue', 'sequential', 'reminder', 'serviceName', 'serviceUrl', 'countersign', 'approveMode', 'passRate'])
 const FLOW_KEYS = new Set(['source', 'target', 'branch', 'conditionExpression'])
@@ -29,12 +30,13 @@ export function createDesignDocument(model: WorkflowModel, editor: WorkflowEdito
   return { format: 'workflow-designer', version: 1, model, editor }
 }
 
+
 function findUnknownPaths(model: WorkflowModel) {
   const result: string[] = []
   for (const key of Object.keys(model)) if (!MODEL_KEYS.has(key)) result.push(`model.${key}`)
   model.nodes.forEach((node, index) => {
     for (const key of Object.keys(node)) if (!NODE_KEYS.has(key)) result.push(`model.nodes[${index}].${key}`)
-    if (!WORKFLOW_NODE_TYPES.includes(node.type as (typeof WORKFLOW_NODE_TYPES)[number])) result.push(`model.nodes[${index}].type:${node.type}`)
+    if (!isWorkflowNodeType(node.type)) result.push(`model.nodes[${index}].type:${node.type}`)
     if (node.reminder && Object.keys(node.reminder).some(key => !['duration', 'action', 'target', 'name'].includes(key))) result.push(`model.nodes[${index}].reminder`)
   })
   model.flows.forEach((flow, index) => {
@@ -82,7 +84,8 @@ export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIs
     if (!node.id.trim() || ids.has(node.id)) issues.push({ code: 'node-id', message: `节点标识为空或重复：${node.id}`, nodeId: node.id })
     ids.add(node.id)
     if (!node.name.trim()) issues.push({ code: 'node-name', message: '请填写节点名称。', nodeId: node.id })
-    if (!WORKFLOW_NODE_TYPES.includes(node.type as (typeof WORKFLOW_NODE_TYPES)[number])) issues.push({ code: 'unknown-node', message: `暂不支持“${node.type}”节点，保留原始数据但不能编译。`, nodeId: node.id })
+    if (!isWorkflowNodeType(node.type)) issues.push({ code: 'unknown-node', message: `暂不支持“${node.type}”节点，保留原始数据但不能编译。`, nodeId: node.id })
+    else issues.push(...(getWorkflowNodeDefinition(node.type)?.checkValid?.(node) ?? []))
   }
   const ordinary = new Map<string, string[]>()
   const outgoing = new Map<string, string[]>()
@@ -104,21 +107,6 @@ export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIs
   for (const node of model.nodes) {
     if (node.type !== 'end' && !outgoing.has(node.id)) issues.push({ code: 'no-outgoing', message: `“${node.name || node.id}”没有后续步骤。`, nodeId: node.id })
     if (node.type !== 'start' && !model.flows.some(flow => flow.target === node.id)) issues.push({ code: 'no-incoming', message: `“${node.name || node.id}”没有上游步骤。`, nodeId: node.id })
-    if (node.type === 'service' && node.serviceUrl?.trim()) {
-      try { const url = new URL(node.serviceUrl); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('scheme') }
-      catch { issues.push({ code: 'service-url', message: '服务地址必须是有效的 HTTP 或 HTTPS URL。', nodeId: node.id }) }
-    }
-    if (node.type === 'receive' && node.messageName !== undefined && typeof node.messageName !== 'string') {
-      issues.push({ code: 'message-name-type', message: '消息名必须是文本。', nodeId: node.id })
-    }
-    if (node.type === 'timer') {
-      if (node.timerType !== undefined && !['duration', 'date', 'cycle'].includes(String(node.timerType))) {
-        issues.push({ code: 'timer-type', message: '等待条件仅支持时长、指定时刻或周期。', nodeId: node.id })
-      }
-      if (node.timerValue !== undefined && typeof node.timerValue !== 'string') {
-        issues.push({ code: 'timer-value-type', message: '定时时间必须是文本。', nodeId: node.id })
-      }
-    }
   }
   const visiting = new Set<string>(), visited = new Set<string>()
   const hasCycle = (id: string): boolean => {

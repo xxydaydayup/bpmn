@@ -41,8 +41,9 @@ export function refreshFeedbackRoutes(
   nodes: DesignerNode[],
   edges: DesignerEdge[],
   dimensions: ReadonlyMap<string, { width: number; height: number }> = new Map(),
+  onlyEdgeIds?: ReadonlySet<string>,
 ) {
-  const feedbackEdges = new Set(edges.filter(edge => isFeedbackRejectEdge(edge, edges)).map(edge => edge.id))
+  const feedbackEdges = new Set(edges.filter(edge => (!onlyEdgeIds || onlyEdgeIds.has(edge.id)) && isFeedbackRejectEdge(edge, edges)).map(edge => edge.id))
   if (!feedbackEdges.size) return edges
 
   const positions = new Map(nodes.map(node => [node.id, node.position]))

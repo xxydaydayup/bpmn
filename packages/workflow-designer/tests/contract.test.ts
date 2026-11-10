@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../src/fixtures/project-approval.json'
-import { createDesignDocument, parseWorkflowInput } from '../src/contract'
+import { createDesignDocument, parseWorkflowInput, workflowIssues } from '../src/contract'
 import { createNodeRecord, fromCanvas, toCanvas } from '../src/adapter'
 import { validateWorkflowModel } from '../src/validation'
 import type { WorkflowModel } from '../src/types'
+import { WORKFLOW_NODE_TYPES } from '../src/contract'
 
 const model = fixture as WorkflowModel
 
 describe('WorkflowModel v1 public contract', () => {
+  it('derives known runtime node types from the exhaustive built-in definitions', () => {
+    expect(WORKFLOW_NODE_TYPES).toEqual(['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'end'])
+  })
+
   it('round-trips the real project approval fixture without changing business fields, topology or coordinates', () => {
     const mapped = toCanvas(model)
     expect(fromCanvas(mapped.nodes, mapped.edges, model)).toEqual(model)
@@ -74,6 +79,45 @@ describe('WorkflowModel v1 public contract', () => {
     expect(validateWorkflowModel(invalid)).toContainEqual(expect.objectContaining({ code: 'timer-value-format', nodeId: 'minister' }))
   })
 
+  it('keeps node property issues in their node definitions and reports one issue per invalid property', () => {
+    const invalid = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'minister'
+        ? { ...node, type: 'timer', timerType: 'duration', timerValue: 20 }
+        : node.id === 'apply'
+          ? { ...node, type: 'service', serviceUrl: 'ftp://invalid.example' }
+          : node.id === 'gwMinister'
+            ? { ...node, type: 'receive', messageName: 42 }
+            : node),
+    } as unknown as WorkflowModel
+
+    const issues = validateWorkflowModel(invalid)
+    expect(issues.filter(issue => issue.code === 'timer-value-type')).toHaveLength(1)
+    expect(issues.filter(issue => issue.code === 'service-url')).toHaveLength(1)
+    expect(issues.filter(issue => issue.code === 'message-name-type')).toHaveLength(1)
+    expect(workflowIssues(invalid).filter(issue => issue.code === 'timer-value-type')).toHaveLength(1)
+  })
+
+  it('validates reminder targets with full workflow context exactly once', () => {
+    const reminderModel = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'minister'
+        ? { ...node, reminder: { action: 'return', target: 'missing' } }
+        : node),
+    } as WorkflowModel
+    expect(validateWorkflowModel(reminderModel).filter(issue => issue.code === 'reminder-target-invalid')).toHaveLength(1)
+
+    const unsupportedReminder = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'minister'
+        ? { ...node, type: 'receive', reminder: { action: 'return', target: 'missing' } }
+        : node),
+    } as WorkflowModel
+    const issues = validateWorkflowModel(unsupportedReminder)
+    expect(issues.filter(issue => issue.code === 'reminder-node-type')).toHaveLength(1)
+    expect(issues.filter(issue => issue.code === 'reminder-target-invalid')).toHaveLength(1)
+  })
+
   it('validates the service mode and VOTE rate only when service countersign is enabled', () => {
     const serviceModel = {
       ...model,
@@ -91,6 +135,18 @@ describe('WorkflowModel v1 public contract', () => {
 
     const invalidRate = { ...enabled, nodes: enabled.nodes.map(node => node.id === 'apply' ? { ...node, approveMode: 'VOTE', passRate: '1.1' } : node) }
     expect(validateWorkflowModel(invalidRate)).toContainEqual(expect.objectContaining({ code: 'pass-rate-range', nodeId: 'apply' }))
+  })
+
+  it('keeps reminder duration optional and permits a service node as a return target', () => {
+    const reminderModel = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'minister'
+        ? { ...node, reminder: { action: 'return', target: 'apply' } }
+        : node.id === 'apply'
+          ? { ...node, type: 'service' }
+          : node),
+    } as WorkflowModel
+    expect(validateWorkflowModel(reminderModel).some(issue => issue.code.startsWith('reminder-'))).toBe(false)
   })
 
   it('round-trips and validates timeout actions and return targets', () => {

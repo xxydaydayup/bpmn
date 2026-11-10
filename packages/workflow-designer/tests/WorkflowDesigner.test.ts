@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { defineComponent, markRaw } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import WorkflowDesigner from '../src/WorkflowDesigner.vue'
 import WorkflowEdge from '../src/edges/WorkflowEdge.vue'
@@ -16,7 +17,7 @@ vi.mock('@vue-flow/core', async () => {
     VueFlow: defineComponent({
       name: 'VueFlowTestHost',
       props: { nodes: { type: Array, default: () => [] }, edges: { type: Array, default: () => [] }, fitViewOnInit: { type: Boolean, default: false } },
-      emits: ['init', 'nodes-initialized', 'node-click', 'edge-click', 'move-end', 'node-drag-start', 'node-drag', 'node-drag-stop'],
+      emits: ['init', 'nodes-initialized', 'node-click', 'edge-click', 'connect', 'move-end', 'node-drag-start', 'node-drag', 'node-drag-stop'],
       setup(props, { emit }) {
         return () => h('div', { class: 'wfd-flow-mock' }, [
           ...(props.nodes as Array<{ id: string; data: { name: string } }>).map(node => h('button', { class: 'vue-flow__node', type: 'button', onClick: () => emit('node-click', { node }) }, node.data.name)),
@@ -41,6 +42,103 @@ vi.mock('@vue-flow/core', async () => {
 const validModel = fixture as WorkflowModel
 
 describe('public WorkflowDesigner behavior', () => {
+  it('shows and creates all built-in nodes using registered defaults', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const titles = wrapper.findAll('.wfd-library-item strong').map(item => item.text())
+    expect(titles).toHaveLength(8)
+    expect(titles.every((title, index) => title.includes([
+      '开始', '审批', '多人审批', '服务调用', '消息等待', '定时等待', '条件分支', '结束',
+    ][index]!))).toBe(true)
+    expect(wrapper.findAll('.wfd-library-group h3').map(item => item.text())).toEqual(['人工与服务', '流程事件', '流程控制'])
+    expect(wrapper.findAll('.wfd-library-icon svg')).toHaveLength(8)
+    const expected = [
+      ['start', '开始'], ['approval', '审批'], ['countersign', '多人审批'], ['service', '服务调用'],
+      ['receive', '消息等待'], ['timer', '定时等待'], ['condition', '条件分支'], ['end', '结束'],
+    ] as const
+
+    for (const [type, title] of expected) {
+      const button = wrapper.findAll('.wfd-library-item').find(item => item.text().includes(title))
+      expect(button, `${title} should be in the node library`).toBeDefined()
+      await button!.trigger('click')
+    }
+
+    const nodes = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes
+    for (const [type, name] of expected) expect(nodes.find(node => node.type === type && node.name === name)).toBeDefined()
+    expect(nodes.find(node => node.type === 'countersign' && node.name === '多人审批')).toMatchObject({ approveMode: 'ALL', sequential: false })
+    expect(nodes.find(node => node.type === 'timer' && node.name === '定时等待')).toMatchObject({ timerType: 'duration', timerValue: 'PT30M' })
+  })
+
+  it('keeps existing nodes while filtering the palette and merges host defaults over registered defaults', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: {
+      modelValue: validModel,
+      extensions: { nodeTypes: ['timer'], nodeDefaults: { timer: { timerType: 'cycle', timerValue: 'R2/PT1H' } } },
+    } })
+    expect(wrapper.findAll('.wfd-library-item')).toHaveLength(1)
+    expect(wrapper.findAll('.wfd-library-item')[0]!.text()).toContain('定时等待')
+    expect(wrapper.findAll('.vue-flow__node').some(node => node.text().includes('立项审批单'))).toBe(true)
+
+    await wrapper.find('.wfd-library-item').trigger('click')
+    const added = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.at(-1)
+    expect(added).toMatchObject({ type: 'timer', name: '定时等待', timerType: 'cycle', timerValue: 'R2/PT1H' })
+  })
+
+  it('appends host validation while preserving built-in validation and custom inspector overrides', async () => {
+    const CustomInspector = defineComponent({
+      props: { model: { type: Object, required: true }, update: { type: Function, required: true } },
+      template: '<button type="button" class="custom-inspector" @click="update(\'name\', \'host edited\')">Host inspector</button>',
+    })
+    const wrapper = mount(WorkflowDesigner, { props: {
+      modelValue: validModel,
+      extensions: {
+        nodePropertyEditors: { approval: markRaw(CustomInspector) },
+        validate: () => [{ code: 'host-rule', message: '宿主校验问题' }],
+      },
+    } })
+    await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
+    await wrapper.find('.custom-inspector').trigger('click')
+    const exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.nodes.find(node => node.id === 'apply')?.name).toBe('host edited')
+    expect(wrapper.text()).toContain('宿主校验问题')
+    expect(wrapper.find('.wfd-inspector input[placeholder="例如：project-form"]').exists()).toBe(false)
+  })
+
+  it('lets the host connection rule override the registered node connection rules', async () => {
+    const canConnect = vi.fn(() => true)
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel, extensions: { canConnect } } })
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    await flow.vm.$emit('connect', { source: 'end', target: 'apply' })
+    const exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(canConnect).toHaveBeenCalledOnce()
+    expect(exported.flows.at(-1)).toMatchObject({ source: 'end', target: 'apply' })
+  })
+
+  it('rejects connections forbidden by node definitions and keeps condition checks contextual', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    const before = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.flows.length
+
+    await flow.vm.$emit('connect', { source: 'end', target: 'start' })
+    await flow.vm.$emit('connect', { source: 'minister', target: 'start' })
+    await flow.vm.$emit('connect', { source: 'gwMinister', target: 'gwManagers' })
+    await flow.vm.$emit('connect', { source: 'start', target: 'end' })
+    const after = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.flows
+    expect(after).toHaveLength(before + 1)
+    expect(after.at(-1)).toMatchObject({ source: 'start', target: 'end' })
+  })
+
+  it('shows node-level validation messages against their node in the public inspector', async () => {
+    const invalid = {
+      ...validModel,
+      nodes: validModel.nodes.map(node => node.id === 'gwMinister'
+        ? { ...node, type: 'timer', timerType: 'duration', timerValue: 'tomorrow' }
+        : node),
+    } as WorkflowModel
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: invalid } })
+    expect(wrapper.text()).toContain('定时时间格式不符合ISO-8601 时长')
+    await wrapper.findAll('.vue-flow__node').find(node => node.text().includes('部长审批结果'))!.trigger('click')
+    expect(wrapper.text()).toContain('定时时间格式不符合ISO-8601 时长')
+  })
+
   it('creates node ids that can be used as Camunda EL variable names', () => {
     const id = createWorkflowNodeId('approval')
     const assigneeExpression = `\${${id}_assignee}`
@@ -168,6 +266,233 @@ describe('public WorkflowDesigner behavior', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ model: { nodes: expect.arrayContaining([expect.objectContaining({ name: '已更新的申请' })]) } })
   })
 
+  it('keeps the latest viewport and host display data when undoing', async () => {
+    const route = [{ x: 275, y: 213 }, { x: 275, y: 237 }, { x: 435, y: 237 }, { x: 435, y: 285 }]
+    const document = {
+      format: 'workflow-designer', version: 1, model: { ...validModel, modelExtension: { future: true } }, hostEnvelopeExtension: { keep: true },
+      editor: { viewport: { x: 4, y: 8, zoom: 1 }, theme: { accent: '#123456' }, extensions: { hostOverlay: 'keep' }, hostPanel: { collapsed: true }, routes: { 'flow-1': route } },
+    }
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: document } })
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const name = wrapper.find('.wfd-inspector input:not([disabled])')
+    await name.setValue('临时名称')
+    await name.trigger('change')
+    await wrapper.findComponent({ name: 'VueFlowTestHost' }).vm.$emit('move-end', { flowTransform: { x: 42, y: -18, zoom: 1.4 } })
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    const restored = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as { model: WorkflowModel; editor: Record<string, any>; hostEnvelopeExtension: unknown }
+    expect(restored.model.nodes.find(node => node.id === 'apply')?.name).toBe('立项审批单')
+    expect(restored.model.modelExtension).toEqual({ future: true })
+    expect(restored.editor).toMatchObject({ viewport: { x: 42, y: -18, zoom: 1.4 }, theme: { accent: '#123456' }, extensions: { hostOverlay: 'keep' }, hostPanel: { collapsed: true }, routes: { 'flow-1': route } })
+    expect(restored.hostEnvelopeExtension).toEqual({ keep: true })
+  })
+
+  it('does not create history for viewport changes and truncates redo after a new edit', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    await wrapper.findComponent({ name: 'VueFlowTestHost' }).vm.$emit('move-end', { flowTransform: { x: 30, y: 12, zoom: 1.2 } })
+    const hostWriteback = wrapper.emitted('update:modelValue')?.at(-1)?.[0]
+    await wrapper.setProps({ modelValue: hostWriteback as never })
+    expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const field = wrapper.find('.wfd-inspector input:not([disabled])')
+    await field.setValue('第一次编辑')
+    await field.trigger('change')
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const nextField = wrapper.find('.wfd-inspector input:not([disabled])')
+    await nextField.setValue('新分支')
+    await nextField.trigger('change')
+    expect((wrapper.find('button[aria-label="重做"]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('does not reset history when the host writes back several emitted editor states', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    await flow.vm.$emit('move-end', { flowTransform: { x: 12, y: 8, zoom: 1.1 } })
+    await flow.vm.$emit('move-end', { flowTransform: { x: 24, y: 16, zoom: 1.2 } })
+    const writes = wrapper.emitted('update:modelValue')!
+    await wrapper.setProps({ modelValue: writes[0]![0] as never })
+    await wrapper.setProps({ modelValue: writes[1]![0] as never })
+    expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const name = wrapper.find('.wfd-inspector input:not([disabled])')
+    await name.setValue('连续回写后继续编辑')
+    await name.trigger('change')
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'apply')?.name).toBe('立项审批单')
+  })
+
+  it('compiles only the restored WorkflowModel after undo', async () => {
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel, compile } })
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const name = wrapper.find('.wfd-inspector input:not([disabled])')
+    await name.setValue('待撤销名称')
+    await name.trigger('change')
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '生成 BPMN XML')!.trigger('click')
+    await vi.waitFor(() => expect(compile).toHaveBeenCalledOnce())
+    expect(compile).toHaveBeenCalledWith(validModel)
+  })
+
+  it('does not create an undo step for an invalid JSON import', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    await wrapper.findAll('button').find(button => button.text() === '导入 / 转换 JSON')!.trigger('click')
+    await wrapper.find('textarea[aria-label="业务 JSON"]').setValue('{ invalid')
+    await wrapper.findAll('button').find(button => button.text() === '导入到画布')!.trigger('click')
+    expect(wrapper.find('[role="alert"]').text()).toContain('无法解析')
+    expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('resets history when the host replaces the workflow model', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const name = wrapper.find('.wfd-inspector input:not([disabled])')
+    await name.setValue('本地编辑')
+    await name.trigger('change')
+    const replacement = { ...validModel, processId: 'host-replacement', processName: '宿主载入的新流程' }
+    await wrapper.setProps({ modelValue: replacement })
+    expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    const replacementName = wrapper.find('.wfd-inspector input:not([disabled])')
+    await replacementName.setValue('新流程编辑')
+    await replacementName.trigger('change')
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model).toMatchObject({ processId: 'host-replacement', processName: '宿主载入的新流程' })
+  })
+
+  it('records node and flow structure edits as undoable operations', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const flowHost = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    await flowHost.vm.$emit('connect', { source: 'start', target: 'end' })
+    let model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.flows).toHaveLength(validModel.flows.length + 1)
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.flows).toHaveLength(validModel.flows.length)
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.flows.at(-1)).toMatchObject({ source: 'start', target: 'end' })
+
+    await wrapper.findAll('.vue-flow__node')[1].trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '删除')!.trigger('click')
+    model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.nodes.some(node => node.id === 'apply')).toBe(false)
+    expect(model.flows.some(item => item.source === 'apply' || item.target === 'apply')).toBe(false)
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.nodes.find(node => node.id === 'apply')).toMatchObject({ name: '立项审批单', x: 180, y: 145 })
+    expect(model.flows.filter(item => item.source === 'apply' || item.target === 'apply')).toHaveLength(4)
+  })
+
+  it('undoes and redoes adding a node as one graph edit', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const before = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.length
+    await wrapper.findAll('.wfd-library-item').find(item => item.text().includes('定时等待'))!.trigger('click')
+    let model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.nodes).toHaveLength(before + 1)
+    expect(model.nodes.at(-1)).toMatchObject({ type: 'timer', timerType: 'duration', timerValue: 'PT30M' })
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.nodes).toHaveLength(before)
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(model.nodes).toHaveLength(before + 1)
+  })
+
+  it('undoes deletion of a single sequential flow', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const flowIndex = 0
+    await wrapper.findAll('.vue-flow__edge')[flowIndex]!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '删除')!.trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.flows).toHaveLength(validModel.flows.length - 1)
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.flows[flowIndex]).toEqual(validModel.flows[flowIndex])
+  })
+
+  it('undoes a valid JSON import as a single graph edit', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const imported = { ...validModel, processId: 'imported-flow', processName: '导入流程', importerData: { retain: true } }
+    await wrapper.findAll('button').find(button => button.text() === '导入 / 转换 JSON')!.trigger('click')
+    await wrapper.find('textarea[aria-label="业务 JSON"]').setValue(JSON.stringify(imported))
+    await wrapper.findAll('button').find(button => button.text() === '导入到画布')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model).toMatchObject({ processId: 'imported-flow', importerData: { retain: true } })
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.processId).toBe(validModel.processId)
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.processId).toBe('imported-flow')
+  })
+
+  it('imports a full design envelope as one graph edit and keeps its editor data', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const imported = {
+      format: 'workflow-designer', version: 1,
+      model: { ...validModel, processId: 'full-envelope-import', processName: '完整设计稿导入', envelopeData: 'business' },
+      editor: { viewport: { x: 16, y: 24, zoom: 1.3 }, theme: { accent: '#654321' }, hostPanel: { visible: false }, routes: { 'flow-2': [{ x: 1, y: 2 }, { x: 3, y: 4 }] } },
+      hostEnvelopeExtension: { imported: true },
+    }
+    await wrapper.findAll('button').find(button => button.text() === '导入 / 转换 JSON')!.trigger('click')
+    await wrapper.find('textarea[aria-label="业务 JSON"]').setValue(JSON.stringify(imported))
+    await wrapper.findAll('button').find(button => button.text() === '导入到画布')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    let exported = (wrapper.vm as unknown as { exportDesign: () => Record<string, any> }).exportDesign()
+    expect(exported).toMatchObject({ hostEnvelopeExtension: { imported: true }, editor: { theme: { accent: '#654321' }, hostPanel: { visible: false } }, model: { processId: 'full-envelope-import', envelopeData: 'business' } })
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => Record<string, any> }).exportDesign()
+    expect(exported.model.processId).toBe(validModel.processId)
+    expect(exported.hostEnvelopeExtension).toEqual({ imported: true })
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => Record<string, any> }).exportDesign()
+    expect(exported.model.processId).toBe('full-envelope-import')
+    expect(exported).toMatchObject({ hostEnvelopeExtension: { imported: true }, editor: { viewport: { x: 16, y: 24, zoom: 1.3 }, theme: { accent: '#654321' }, hostPanel: { visible: false } } })
+  })
+
+  it('undoes and redoes workflow templates as one edit', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    await wrapper.findAll('button').find(button => button.text() === '流程模板')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '使用模板')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.processId).toBe('serial-approval')
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.processId).toBe(validModel.processId)
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.processId).toBe('serial-approval')
+  })
+
+  it('records flow endpoint, branch, and condition edits with their flow data', async () => {
+    const model = { ...validModel, flows: validModel.flows.map((flow, index) => index === 0 ? { ...flow, conditionExpression: 'amount > 0' } : flow) }
+    const route = [{ x: 20, y: 30 }, { x: 20, y: 80 }]
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: { format: 'workflow-designer', version: 1, model, editor: { routes: { 'flow-0': route } } } } })
+    await wrapper.findAll('.vue-flow__edge')[0].trigger('click')
+    await wrapper.find('.wfd-inspector select').setValue('pass')
+    await wrapper.findAll('.wfd-inspector select')[2].setValue('minister')
+    await wrapper.find('.wfd-inspector textarea').setValue('amount > 100')
+    await wrapper.find('.wfd-inspector textarea').trigger('change')
+    let exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0]).toMatchObject({ source: 'start', target: 'minister', branch: 'pass', conditionExpression: 'amount > 100' })
+    expect((wrapper.vm as unknown as { exportDesign: () => { editor: { routes?: Record<string, unknown> } } }).exportDesign().editor.routes?.['flow-0']).toBeUndefined()
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0]).toMatchObject({ source: 'start', target: 'minister', branch: 'pass', conditionExpression: 'amount > 0' })
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0]).toMatchObject({ source: 'start', target: 'apply', branch: 'pass', conditionExpression: 'amount > 0' })
+    expect((wrapper.vm as unknown as { exportDesign: () => { editor: { routes?: Record<string, unknown> } } }).exportDesign().editor.routes?.['flow-0']).toEqual(route)
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0]).toMatchObject({ source: 'start', target: 'apply', conditionExpression: 'amount > 0' })
+    expect(exported.flows[0]).not.toHaveProperty('branch')
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0]).toMatchObject({ branch: 'pass', conditionExpression: 'amount > 0' })
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0].target).toBe('minister')
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(exported.flows[0]).toMatchObject({ branch: 'pass', conditionExpression: 'amount > 100' })
+  })
+
   it('commits a text field as one undoable edit instead of recording each keystroke', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
     await wrapper.findAll('.vue-flow__node')[1].trigger('click')
@@ -288,6 +613,27 @@ describe('public WorkflowDesigner behavior', () => {
     expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')).toMatchObject({ x: 340, y: 145 })
   })
 
+  it('restores route points with their flow when undoing and redoing a node drag', async () => {
+    const route = [{ x: 275, y: 213 }, { x: 275, y: 237 }, { x: 435, y: 237 }, { x: 435, y: 285 }]
+    const document = { format: 'workflow-designer', version: 1, model: validModel, editor: { routes: { 'flow-1': route } } }
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: document } })
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    const vm = wrapper.vm as unknown as { nodes: Array<{ id: string; position: { x: number; y: number } }> }
+    await flow.vm.$emit('node-drag-start', { node: { id: 'minister' }, nodes: [] })
+    vm.nodes = vm.nodes.map(node => node.id === 'minister' ? { ...node, position: { x: 411, y: 233 } } : node)
+    await wrapper.vm.$nextTick()
+    await flow.vm.$emit('node-drag-stop', { node: { id: 'minister' }, nodes: [] })
+    await wrapper.vm.$nextTick()
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    let exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel; editor: { routes?: Record<string, unknown> } } }).exportDesign()
+    expect(exported.model.nodes.find(node => node.id === 'minister')).toMatchObject({ x: 340, y: 145 })
+    expect(exported.editor.routes?.['flow-1']).toEqual(route)
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    exported = (wrapper.vm as unknown as { exportDesign: () => typeof exported }).exportDesign()
+    expect(exported.model.nodes.find(node => node.id === 'minister')).toMatchObject({ x: 411, y: 233 })
+    expect(exported.editor.routes?.['flow-1']).toEqual(route)
+  })
+
   it('rebuilds right-side reject routes from the final node coordinates after dragging', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
     const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
@@ -328,14 +674,21 @@ describe('public WorkflowDesigner behavior', () => {
     await vi.waitFor(() => expect(vm.nodes.some((node, index) => node.position.x !== initialPosition.x && index === 0)).toBe(true))
     const fitView = (wrapper.vm as unknown as { flow: { fitView: ReturnType<typeof vi.fn> } }).flow.fitView
     await vi.waitFor(() => expect(fitView).toHaveBeenCalledWith({ padding: 0.12, duration: 260 }))
+    expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('uses a top-to-bottom direction for the full-flow automatic layout', async () => {
+  it('records manual automatic layout as one undoable graph edit', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const before = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
     await wrapper.findAll('button').find(button => button.text() === '自动布局')!.trigger('click')
     await vi.waitFor(() => expect((wrapper.vm as unknown as { nodes: Array<{ id: string; position: { x: number; y: number } }> }).nodes.find(node => node.id === 'end')?.position.y).toBeGreaterThan(600))
     const nodes = (wrapper.vm as unknown as { nodes: Array<{ id: string; position: { x: number; y: number } }> }).nodes
     expect(nodes.find(node => node.id === 'start')!.position.x).toBe(nodes.find(node => node.id === 'apply')!.position.x)
+    await wrapper.find('button[aria-label="撤销"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.map(node => [node.id, node.x, node.y]))
+      .toEqual(before.nodes.map(node => [node.id, node.x, node.y]))
+    await wrapper.find('button[aria-label="重做"]').trigger('click')
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'end')!.y).toBeGreaterThan(600)
   })
 
   it('offers reusable JSON workflow templates and replaces the canvas through the template picker', async () => {

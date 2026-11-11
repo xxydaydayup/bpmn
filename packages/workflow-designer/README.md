@@ -32,9 +32,13 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 消息等待节点使用 `type: 'receive'` 与可选 `messageName`。消息名填写后由后端固化到流程模板；留空则业务流程启动表单提供 `{节点id}_messageName`，仍留空时后端回退到节点 ID。节点到达后等待业务方通过消息接口发送匹配消息再继续，不创建人工待办。定时等待节点使用 `type: 'timer'`、`timerType`（`duration` / `date` / `cycle`）和可选 `timerValue`；新节点默认为 `duration` + `PT30M`，切换类型会更新相应格式的示例。时间值留空时业务启动表单要求填写 `{节点id}_timerValue`；引擎到期自动继续，不创建人工待办。启动表单值映射到真实 `variables` 请求，同时可在启动变量 JSON 中编辑。
 
+所有内置节点都可在通用属性面板设置可选字符串 `bizType`，用于记录宿主业务系统解释的节点级业务标识。该值随业务工作流模型及设计稿导入导出，并传入宿主 `compile(model)` 回调；设计器不校验其格式或唯一性，也不将它映射到 BPMN XML 或 `params_rules`。bizType 是 WorkflowModel v1 的已知字段，空值会从节点记录移除。
+
 ## 扩展能力
 
-设计器后续会持续新增节点类型和节点属性来扩展能力。按 ADR-0005 的契约，新增影响编译的节点或字段时，须先升级正式业务 JSON 契约并实现后端编译能力，再同步 schema 副本、前端类型与映射；未升级前，未知业务字段/节点保持原样并阻止编译。
+设计器支持 `type: 'subProcess'` 的嵌入式子流程节点。选择节点属性中的片段后，设计稿保存片段库来源 key/name 与 `process` 内容快照；宿主提交编译前会剔除来源字段和片段画布宽高，只发送后端 `/bpmn/spec` 规定的递归流程字段。编译器按规范展开完整子流程（包括逐层前缀化内部节点与连线 ID，并重写同层提醒目标）。设计器片段编辑模式允许不含开始或结束节点，保存前要求至少一个节点；管理页面和 API 仍由宿主提供。片段库后续修改不会自动改变已保存节点快照。
+
+设计器后续会持续新增节点类型和节点属性来扩展能力。按 ADR-0005 的契约，新增影响编译的节点或字段时，须先升级正式业务 JSON 契约并实现后端编译能力，再同步 schema 副本、前端类型与映射；未升级前，未知业务字段/节点保持原样并阻止编译。`subProcess.process` 的正式编译字段以 [业务 JSON 规范](http://192.168.124.202:8085/bpmn/spec) 为准，Schema 副本的来源说明也应引用该后端规范。
 
 当前契约副本和真实立项审批 fixture 分别见 schema/workflow-model-v1.schema.json 与 src/fixtures/project-approval.json。它们基于 D:/Code/github.com/xxydaydayup/workflow/src/api/workflowModel.ts 和该仓库的业务样例，于 2026-11-03 迁移；后端编译器维护方发布正式 Schema 后应以其为准更新此副本。
 

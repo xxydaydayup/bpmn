@@ -2,9 +2,11 @@ import type { WorkflowDesignDocument, WorkflowEditorState, WorkflowInput, Workfl
 import { getWorkflowNodeDefinition, isWorkflowNodeType } from './nodes'
 export { WORKFLOW_NODE_TYPES } from './nodes'
 
-const MODEL_KEYS = new Set(['processId', 'processName', 'nodes', 'flows'])
-const NODE_KEYS = new Set(['id', 'type', 'name', 'x', 'y', 'form', 'messageName', 'timerType', 'timerValue', 'sequential', 'reminder', 'serviceName', 'serviceUrl', 'countersign', 'approveMode', 'passRate'])
-const FLOW_KEYS = new Set(['source', 'target', 'branch', 'conditionExpression'])
+const MODEL_KEYS = new Set(['processId', 'processName', 'nodes', 'flows', 'width', 'height', 'bizFormKey'])
+const EMBEDDED_PROCESS_KEYS = new Set(['processId', 'processName', 'nodes', 'flows'])
+const NODE_KEYS = new Set(['id', 'type', 'name', 'x', 'y', 'width', 'height', 'bizType', 'form', 'messageName', 'timerType', 'timerValue', 'sequential', 'reminder', 'serviceName', 'serviceUrl', 'countersign', 'approveMode', 'passRate', 'process', 'subProcessKey', 'subProcessName', 'statusVariable', 'allowTransfer', 'allowAddSigner', 'bizFormKey', 'assignee'])
+const FLOW_KEYS = new Set(['id', 'source', 'target', 'branch', 'conditionExpression'])
+const MODEL_DEPTH_LIMIT = 100
 
 export interface ParsedWorkflowInput {
   document: WorkflowDesignDocument | Record<string, unknown>
@@ -19,7 +21,26 @@ export interface ParsedWorkflowInput {
 export function isWorkflowModel(value: unknown): value is WorkflowModel {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Record<string, unknown>
-  return typeof candidate.processId === 'string' && typeof candidate.processName === 'string' && Array.isArray(candidate.nodes) && Array.isArray(candidate.flows)
+  return typeof candidate.processId === 'string'
+    && (candidate.processName === undefined || typeof candidate.processName === 'string')
+    && Array.isArray(candidate.nodes)
+    && (candidate.flows === undefined || Array.isArray(candidate.flows))
+}
+
+function normalizeWorkflowModel(value: Record<string, unknown>): WorkflowModel {
+  const processId = String(value.processId ?? '')
+  const nodes = Array.isArray(value.nodes) ? value.nodes.map((item, index) => {
+    const node = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : {}
+    return {
+      ...node,
+      id: String(node.id ?? ''),
+      type: String(node.type ?? ''),
+      name: String(node.name ?? ''),
+      x: typeof node.x === 'number' && Number.isFinite(node.x) ? node.x : 300,
+      y: typeof node.y === 'number' && Number.isFinite(node.y) ? node.y : 80 + index * 120,
+    }
+  }) as WorkflowModel['nodes'] : []
+  return { ...value, processId, processName: String(value.processName ?? processId), nodes, flows: Array.isArray(value.flows) ? value.flows as WorkflowModel['flows'] : [] } as WorkflowModel
 }
 
 function isEnvelope(value: Record<string, unknown>) {
@@ -31,17 +52,26 @@ export function createDesignDocument(model: WorkflowModel, editor: WorkflowEdito
 }
 
 
-function findUnknownPaths(model: WorkflowModel) {
+function findUnknownPaths(model: WorkflowModel, path = 'model', depth = 0, embedded = false): string[] {
   const result: string[] = []
-  for (const key of Object.keys(model)) if (!MODEL_KEYS.has(key)) result.push(`model.${key}`)
+  const allowedModelKeys = embedded ? EMBEDDED_PROCESS_KEYS : MODEL_KEYS
+  for (const key of Object.keys(model)) if (!allowedModelKeys.has(key)) result.push(`${path}.${key}`)
+  if (depth > MODEL_DEPTH_LIMIT) { result.push(`${path}.nodes (子流程嵌套超过安全检查上限)`); return result }
   model.nodes.forEach((node, index) => {
-    for (const key of Object.keys(node)) if (!NODE_KEYS.has(key)) result.push(`model.nodes[${index}].${key}`)
-    if (!isWorkflowNodeType(node.type)) result.push(`model.nodes[${index}].type:${node.type}`)
-    if (node.reminder && Object.keys(node.reminder).some(key => !['duration', 'action', 'target', 'name'].includes(key))) result.push(`model.nodes[${index}].reminder`)
+    const nodePath = `${path}.nodes[${index}]`
+    for (const key of Object.keys(node)) if (!NODE_KEYS.has(key)) result.push(`${nodePath}.${key}`)
+    if (!isWorkflowNodeType(node.type)) result.push(`${nodePath}.type:${node.type}`)
+    if (node.reminder && Object.keys(node.reminder).some(key => !['duration', 'action', 'target', 'terminate', 'name'].includes(key))) {
+      for (const key of Object.keys(node.reminder)) if (!['duration', 'action', 'target', 'terminate', 'name'].includes(key)) result.push(`${nodePath}.reminder.${key}`)
+    }
+    if (node.type === 'subProcess' && node.process && Array.isArray(node.process.nodes)) {
+      const process = { ...node.process, flows: Array.isArray(node.process.flows) ? node.process.flows : [] } as WorkflowModel
+      result.push(...findUnknownPaths(process, `${nodePath}.process`, depth + 1, true))
+    }
   })
   model.flows.forEach((flow, index) => {
-    for (const key of Object.keys(flow)) if (!FLOW_KEYS.has(key)) result.push(`model.flows[${index}].${key}`)
-    if (flow.branch !== undefined && flow.branch !== 'pass' && flow.branch !== 'reject') result.push(`model.flows[${index}].branch`)
+    const flowPath = `${path}.flows[${index}]`
+    for (const key of Object.keys(flow)) if (!FLOW_KEYS.has(key)) result.push(`${flowPath}.${key}`)
   })
   return result
 }
@@ -51,7 +81,7 @@ export function parseWorkflowInput(input: WorkflowInput): ParsedWorkflowInput {
   if (isEnvelope(value)) {
     const rawModel = value.model
     const validModel = isWorkflowModel(rawModel)
-    const model = validModel ? rawModel : { processId: '', processName: '', nodes: [], flows: [] } as WorkflowModel
+    const model = validModel ? normalizeWorkflowModel(rawModel as Record<string, unknown>) : { processId: '', processName: '', nodes: [], flows: [] } as WorkflowModel
     const future = value.version !== 1
     const preserveEnvelope = future || !validModel
     return {
@@ -65,8 +95,9 @@ export function parseWorkflowInput(input: WorkflowInput): ParsedWorkflowInput {
     }
   }
   if (isWorkflowModel(value)) {
+    const model = normalizeWorkflowModel(value)
     const editor: WorkflowEditorState = {}
-    return { document: createDesignDocument(value, editor), model: value, editor, readonly: false, unsupportedEnvelope: false, unknownPaths: findUnknownPaths(value), original: value }
+    return { document: createDesignDocument(model, editor), model, editor, readonly: false, unsupportedEnvelope: false, unknownPaths: findUnknownPaths(model), original: value }
   }
   const empty = { processId: '', processName: '', nodes: [], flows: [] } as WorkflowModel
   return { document: value, model: empty, editor: {}, readonly: true, unsupportedEnvelope: true, unknownPaths: ['无法识别设计稿格式'], original: value }

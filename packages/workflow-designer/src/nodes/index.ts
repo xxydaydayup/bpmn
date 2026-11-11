@@ -6,6 +6,7 @@ import endNode from './end/default'
 import receiveNode from './receive/default'
 import serviceNode from './service/default'
 import startNode from './start/default'
+import subProcessNode from './subprocess/default'
 import timerNode from './timer/default'
 import type { RegisteredWorkflowNodeDefinition, WorkflowNodeDefinition } from './types'
 
@@ -18,6 +19,7 @@ export const workflowNodeDefinitions = {
   receive: receiveNode,
   timer: timerNode,
   condition: conditionNode,
+  subProcess: subProcessNode,
   end: endNode,
 } satisfies { [Type in WorkflowNodeType]: RegisteredWorkflowNodeDefinition<Type> }
 

@@ -5,7 +5,8 @@
   "type": "module",
   "files": [
     "dist",
-    "src/fixtures"
+    "src/fixtures",
+    "src/types.ts"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -17,7 +18,8 @@
       "import": "./dist/index.js"
     },
     "./style.css": "./dist/style.css",
-    "./fixtures/project-approval.json": "./src/fixtures/project-approval.json"
+    "./fixtures/project-approval.json": "./src/fixtures/project-approval.json",
+    "./types": "./src/types.ts"
   },
   "scripts": {
     "build": "pnpm typecheck && vue-tsc -p tsconfig.build.json && vite build",

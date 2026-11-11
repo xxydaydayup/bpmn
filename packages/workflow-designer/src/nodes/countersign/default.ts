@@ -2,6 +2,7 @@ import { IconUsers } from '@tabler/icons-vue'
 import type { WorkflowNodeRecord, WorkflowValidationIssue } from '../../types'
 import type { WorkflowNodeDefinition } from '../types'
 import { isValidPassRate, validateReminderProperties } from '../validation-rules'
+import PropertyEditor from './PropertyEditor.vue'
 
 const countersignNode = {
   type: 'countersign',
@@ -12,6 +13,7 @@ const countersignNode = {
   category: '人工与服务',
   supportsReminder: true,
   defaultValue: { name: '多人审批', approveMode: 'ALL', sequential: false },
+  propertyEditor: PropertyEditor,
   checkValid(node: WorkflowNodeRecord): WorkflowValidationIssue[] {
     const issues: WorkflowValidationIssue[] = validateReminderProperties(node)
     if (node.approveMode === 'VOTE' && !(typeof node.passRate === 'string' && node.passRate.trim())) {

@@ -2,6 +2,7 @@ import { IconRobot } from '@tabler/icons-vue'
 import type { WorkflowNodeRecord, WorkflowValidationIssue } from '../../types'
 import type { WorkflowNodeDefinition } from '../types'
 import { isValidPassRate, validateServiceUrl } from '../validation-rules'
+import PropertyEditor from './PropertyEditor.vue'
 
 const serviceNode = {
   type: 'service',
@@ -11,6 +12,7 @@ const serviceNode = {
   sort: 40,
   category: '人工与服务',
   defaultValue: { name: '服务调用' },
+  propertyEditor: PropertyEditor,
   checkValid(node: WorkflowNodeRecord): WorkflowValidationIssue[] {
     const issues: WorkflowValidationIssue[] = validateServiceUrl(node)
     const approveModes: readonly string[] = ['ALL', 'ANY', 'VOTE']

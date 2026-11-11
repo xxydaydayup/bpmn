@@ -2,6 +2,7 @@ import { IconClock } from '@tabler/icons-vue'
 import type { WorkflowNodeRecord, WorkflowValidationIssue } from '../../types'
 import type { WorkflowNodeDefinition } from '../types'
 import { isCronExpression, isIsoDateTime, isIsoDuration, isIsoRepeat } from '../validation-rules'
+import PropertyEditor from './PropertyEditor.vue'
 
 const timerNode = {
   type: 'timer',
@@ -11,6 +12,7 @@ const timerNode = {
   sort: 60,
   category: '流程事件',
   defaultValue: { name: '定时等待', timerType: 'duration', timerValue: 'PT30M' },
+  propertyEditor: PropertyEditor,
   checkValid(node: WorkflowNodeRecord): WorkflowValidationIssue[] {
     if (node.timerType !== undefined && !['duration', 'date', 'cycle'].includes(String(node.timerType))) {
       return [{ code: 'timer-type', message: '等待条件仅支持时长、指定时刻或周期。', nodeId: node.id }]

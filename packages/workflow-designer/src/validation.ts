@@ -14,8 +14,8 @@ export function validateWorkflowModel(model: WorkflowModel, custom: WorkflowVali
         const targetNode = model.nodes.find(candidate => candidate.id === target)
         if (!target) {
           base.push({ code: 'reminder-target-required', message: '超时处理选择“中断并退回”时，需要选择退回目标。', nodeId: node.id })
-        } else if (!targetNode || !['approval', 'countersign', 'service'].includes(targetNode.type) || target === node.id) {
-          base.push({ code: 'reminder-target-invalid', message: '退回目标必须是当前流程中除本节点外的审批、多人审批或服务节点。', nodeId: node.id })
+        } else if (!targetNode || !['approval', 'countersign', 'service', 'subProcess'].includes(targetNode.type) || target === node.id) {
+          base.push({ code: 'reminder-target-invalid', message: '退回目标必须是当前流程中除本节点外的审批、多人审批、服务或子流程节点。', nodeId: node.id })
         }
       } else if (target) {
         base.push({ code: 'reminder-target-unexpected', message: '只有超时处理选择“中断并退回”时才能配置退回目标。', nodeId: node.id })

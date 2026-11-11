@@ -1,39 +1,57 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/workflow-model-v1.schema.json",
-  "title": "WorkflowModel v1 (migration copy)",
-  "description": "Migration baseline copied from D:/Code/github.com/xxydaydayup/workflow/src/api/workflowModel.ts and docs/examples/立项申请/project_approval_json.md on 2026-11-03. Not the backend compiler's authoritative schema; replace the source metadata when the backend publishes it.",
+  "title": "WorkflowModel v1 (backend contract copy)",
+  "description": "Schema copy aligned with the backend business JSON specification at http://192.168.124.202:8085/bpmn/spec on 2026-11-10. The backend specification remains authoritative.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["processId", "processName", "nodes", "flows"],
+  "required": ["processId", "nodes"],
   "properties": {
     "processId": { "type": "string", "minLength": 1 },
     "processName": { "type": "string", "minLength": 1 },
+    "bizFormKey": { "type": "string" },
     "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "flows": { "type": "array", "items": { "$ref": "#/$defs/flow" } }
+    "flows": { "type": "array", "items": { "$ref": "#/$defs/flow" } },
+    "width": { "type": "number" },
+    "height": { "type": "number" }
   },
   "$defs": {
     "node": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "type", "name", "x", "y"],
+      "required": ["id", "type"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["start", "approval", "countersign", "service", "receive", "timer", "condition", "end"] },
+        "type": { "enum": ["start", "approval", "countersign", "service", "receive", "timer", "condition", "subProcess", "end"] },
         "name": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" },
+        "width": { "type": "number" }, "height": { "type": "number" },
+        "bizType": { "type": "string", "description": "可选的节点级业务标识，由宿主业务系统解释。" },
         "form": { "type": "string" }, "messageName": { "type": "string" },
         "timerType": { "enum": ["duration", "date", "cycle"] }, "timerValue": { "type": "string" },
         "sequential": { "type": "boolean" },
-        "reminder": { "type": "object", "additionalProperties": false, "properties": { "duration": { "type": "string", "description": "ISO-8601 超时时长；留空时可由流程启动变量提供，仍未提供则后端按 P1D 兜底。" }, "action": { "enum": ["notify", "return", "end"], "description": "超时处理方式；缺省 notify。" }, "target": { "type": "string", "description": "仅 action=return：退回到已存在的审批或服务活动节点。" }, "name": { "type": "string", "description": "边界定时事件名称/提醒文案。" } } },
+        "reminder": { "type": "object", "additionalProperties": false, "properties": { "duration": { "type": "string", "description": "ISO-8601 超时时长；留空时后端按 P1D 兜底。" }, "action": { "enum": ["notify", "return", "end"] }, "target": { "type": "string", "description": "仅 action=return：退回到同一层的活动节点。" }, "terminate": { "type": "boolean" }, "name": { "type": "string" } } },
+        "statusVariable": { "type": "string" }, "allowTransfer": { "type": "boolean" }, "allowAddSigner": { "type": "boolean" },
+        "bizFormKey": { "type": "string" }, "assignee": { "type": "string" },
         "serviceName": { "type": "string" }, "serviceUrl": { "type": "string" },
         "countersign": { "type": "boolean", "description": "启用服务节点的多实例调用与会签结果汇总。" },
         "approveMode": { "type": "string", "description": "服务会签策略：ALL、ANY 或 VOTE；留空时由后端按默认/启动变量处理。" },
         "sequential": { "type": "boolean", "description": "服务会签多实例是否按顺序执行；缺省为并行。" },
-        "passRate": { "type": "string", "description": "VOTE 策略的通过比例，范围为 (0, 1]。" }
+        "passRate": { "type": "string", "description": "VOTE 策略的通过比例，范围为 (0, 1]。" },
+        "process": { "$ref": "#/$defs/process" },
+        "subProcessKey": { "type": "string", "description": "片段来源 key，仅用于设计器显示与显式刷新。" },
+        "subProcessName": { "type": "string", "description": "片段来源名称，仅用于设计器显示。" }
+      }
+    },
+    "process": {
+      "type": "object", "required": ["nodes"], "additionalProperties": false,
+      "properties": {
+        "processId": { "type": "string" }, "processName": { "type": "string" },
+        "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
+        "flows": { "type": "array", "items": { "$ref": "#/$defs/flow" } }
       }
     },
     "flow": {
       "type": "object", "additionalProperties": false, "required": ["source", "target"],
-      "properties": { "source": { "type": "string" }, "target": { "type": "string" }, "branch": { "enum": ["pass", "reject"] }, "conditionExpression": { "type": "string" } }
+      "properties": { "id": { "type": "string" }, "source": { "type": "string" }, "target": { "type": "string" }, "branch": { "type": "string" }, "conditionExpression": { "type": "string" } }
     }
   }
 }

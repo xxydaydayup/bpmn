@@ -9,6 +9,7 @@ export type {
   WorkflowBranch, WorkflowCompile, WorkflowDeploy, WorkflowVerifyDeployment, WorkflowDesignDocument, WorkflowDesignerExtensions,
   WorkflowDesignerProps, WorkflowEditorState, WorkflowFlowRecord, WorkflowInput,
   WorkflowModel, WorkflowNodeRecord, WorkflowNodeType, WorkflowValidationIssue,
+  WorkflowDesignerMode, WorkflowSubProcessDataSource, WorkflowSubProcessFragment, WorkflowSubProcessFragmentEditorValue, WorkflowSubProcessModel, WorkflowSubProcessQuery,
   WorkflowViewport, WorkflowTheme,
 } from './types'
 

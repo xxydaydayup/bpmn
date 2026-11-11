@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElButton, ElIcon, ElMenu, ElMenuItem } from 'element-plus'
-import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting, Tickets } from '@element-plus/icons-vue'
+import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting, Tickets, Files } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -9,7 +9,8 @@ import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 const app = useAppStore()
 const route = useRoute()
 const workflowRuntime = resolveWorkflowRuntime(import.meta.env)
-const isWorkflowEditor = computed(() => route.path === '/designer' || route.path === '/workflow-designer')
+const isWorkflowEditor = computed(() => route.path === '/designer' || route.path === '/workflow-designer' || (route.path === '/sub-processes' && route.query.editor === '1'))
+const activeMenuPath = computed(() => route.path === '/sub-processes' && route.query.editor === '1' ? '/sub-processes' : route.path)
 const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
 </script>
 
@@ -23,7 +24,7 @@ const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
       <div v-if="!collapsed" class="nav-caption">工作空间</div>
       <ElMenu
         router
-        :default-active="route.path"
+        :default-active="activeMenuPath"
         :collapse="collapsed"
         :collapse-transition="false"
         class="sidebar-menu"
@@ -39,6 +40,10 @@ const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
         <ElMenuItem index="/workflow-designer" aria-label="业务工作流设计器">
           <ElIcon><Connection /></ElIcon>
           <template #title><span>业务工作流设计</span></template>
+        </ElMenuItem>
+        <ElMenuItem index="/sub-processes" aria-label="子流程片段">
+          <ElIcon><Files /></ElIcon>
+          <template #title><span>子流程片段</span></template>
         </ElMenuItem>
         <ElMenuItem v-if="workflowRuntime.developerToolsEnabled" index="/camunda" aria-label="Camunda 7 引擎联调">
           <ElIcon><VideoPlay /></ElIcon>

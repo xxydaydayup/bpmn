@@ -1,6 +1,7 @@
 import { IconMessage } from '@tabler/icons-vue'
 import type { WorkflowNodeRecord, WorkflowValidationIssue } from '../../types'
 import type { WorkflowNodeDefinition } from '../types'
+import PropertyEditor from './PropertyEditor.vue'
 
 const receiveNode = {
   type: 'receive',
@@ -10,6 +11,7 @@ const receiveNode = {
   sort: 50,
   category: '流程事件',
   defaultValue: { name: '消息等待' },
+  propertyEditor: PropertyEditor,
   checkValid(node: WorkflowNodeRecord): WorkflowValidationIssue[] {
     if (node.messageName !== undefined && typeof node.messageName !== 'string') {
       return [{ code: 'message-name-type', message: '消息名必须是文本。', nodeId: node.id }]

@@ -12,6 +12,10 @@ const timerModeLabels: Record<string, string> = { duration: '等时长', date: '
 const eventSummary = () => props.data.kind === 'receive'
   ? (typeof props.data.original.messageName === 'string' && props.data.original.messageName ? '等 ' + props.data.original.messageName : '等业务消息')
   : (String(props.data.original.timerValue ?? 'PT30M'))
+const subProcessSummary = () => {
+  const process = props.data.original.process
+  return process && Array.isArray(process.nodes) ? `${process.nodes.length} 个步骤` : '尚未选择片段'
+}
 </script>
 
 <template>
@@ -20,6 +24,7 @@ const eventSummary = () => props.data.kind === 'receive'
     <span class="wfd-node-icon" aria-hidden="true"><component :is="definition()?.icon" :size="18" :stroke-width="1.7" /></span>
     <span class="wfd-node-copy"><small>{{ definition()?.title ?? ('未知 · ' + props.data.kind) }}</small><strong>{{ props.data.name || '未命名节点' }}</strong></span>
     <span v-if="props.data.kind === 'receive'" class="wfd-node-tag wfd-node-tag-receive">{{ eventSummary() }}</span>
+    <span v-else-if="props.data.kind === 'subProcess'" class="wfd-node-tag wfd-node-tag-subprocess">{{ subProcessSummary() }}</span>
     <span v-else-if="props.data.kind === 'timer'" class="wfd-node-tag wfd-node-tag-timer">{{ timerModeLabels[String(props.data.original.timerType ?? 'duration')] }} · {{ eventSummary() }}</span>
     <span v-if="props.data.kind === 'countersign'" class="wfd-node-tag">{{ approvalModeLabels[String(props.data.original.approveMode ?? '')] ?? '发起时选择' }}</span>
     <span v-else-if="props.data.kind === 'service' && props.data.original.countersign === true" class="wfd-node-tag wfd-node-tag-service">{{ serviceModeLabels[String(props.data.original.approveMode ?? '')] ?? '多服务 · 动态' }}</span>

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { WorkflowDesigner, type WorkflowDesignDocument, type WorkflowInput, type WorkflowModel } from '@workflow/designer'
 import '@workflow/designer/style.css'
 import fixture from '@workflow/designer/fixtures/project-approval.json'
 import { request } from '@/utils/request'
-import { businessWorkflowGateway, type TaskTemplate } from '@/api/workflow'
+import { businessWorkflowGateway, subProcessLibraryGateway, toBpmnCompilerJson, type TaskTemplate } from '@/api/workflow'
 import { diagramCSSVariables } from '@/bpmn/theme'
 import '@/styles/designer.css'
 import axios from 'axios'
 
 const document = ref<WorkflowInput>({ format: 'workflow-designer', version: 1, model: fixture as WorkflowModel, editor: { theme: { accent: '#28705d' } } } satisfies WorkflowDesignDocument)
+const router = useRouter()
 const canvasStyle = computed(() => diagramCSSVariables())
 const compileNotice = ref('')
 const currentModel = computed(() => {
@@ -74,7 +76,7 @@ const verifyDeployment = async (model: WorkflowModel) => {
 const isDeployedCurrentModel = computed(() => Boolean(deployment.value && deployedModel.value === JSON.stringify(currentModel.value)))
 const compile = async (model: WorkflowModel) => {
   compileNotice.value = ''
-  const response = await request<{ code: string; data?: { bpmnXml?: string }; message?: string }>({ method: 'POST', url: '/v1/bpmn/json2xml', data: model })
+  const response = await request<{ code: string; data?: { bpmnXml?: string }; message?: string }>({ method: 'POST', url: '/v1/bpmn/json2xml', data: toBpmnCompilerJson(model) })
   const bpmnXml = response?.data?.bpmnXml
   if (response?.code !== 'OK') throw new Error(response?.message || '后端编译失败')
   if (!bpmnXml?.trim()) throw new Error('编译接口未返回 BPMN XML')
@@ -88,7 +90,11 @@ const compile = async (model: WorkflowModel) => {
     <header class="designer-document-header">
       <div class="designer-document-title"><div class="designer-breadcrumb">工作空间 <span>/</span> 业务流程设计</div><div class="designer-title-line"><h1>{{ currentModel.processName || '未命名流程' }}</h1><span class="designer-draft">业务模型 · {{ currentModel.nodes.length }} 个节点</span></div></div>
     </header>
-    <WorkflowDesigner v-model="document" :compile="compile" :deploy="deploy" :verify-deployment="verifyDeployment" :auto-layout-on-init="true" />
+    <WorkflowDesigner v-model="document" :compile="compile" :deploy="deploy" :verify-deployment="verifyDeployment" :auto-layout-on-init="true" :extensions="{ subprocessFragments: subProcessLibraryGateway, nodeTypes: ['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'] }">
+      <template #toolbar-end>
+        <a class="subprocess-manage-link" :href="router.resolve({ name: 'sub-processes' }).href" target="_blank" rel="noopener noreferrer">管理子流程片段 <span aria-hidden="true">↗</span></a>
+      </template>
+    </WorkflowDesigner>
     <p v-if="compileNotice" class="host-notice" role="status">{{ compileNotice }}</p>
     <p v-if="deploymentNotice" class="host-notice" role="status">{{ deploymentNotice }}<span v-if="isDeployedCurrentModel && deployment">模板 {{ deployment.taskKey || deployment.processDefinitionKey }} · v{{ deployment.version }} · 部署 {{ deployment.deploymentId }} · 定义 {{ deployment.processDefinitionId }}</span></p>
   </section>
@@ -96,10 +102,15 @@ const compile = async (model: WorkflowModel) => {
 
 <style scoped>
 .workflow-designer-page { --wfd-accent: var(--diagram-accent); }
+.workflow-designer-page :deep(.subprocess-manage-link) { display: inline-flex; align-items: center; justify-content: center; align-self: center; min-height: 36px; padding: 0 11px; border: 1px solid transparent; border-radius: 5px; color: #50695e; font-size: 12px; font-weight: 550; text-decoration: none; white-space: nowrap; transition: color .16s ease, border-color .16s ease, background .16s ease; }
+.workflow-designer-page :deep(.subprocess-manage-link:hover) { border-color: #d8e5dc; color: var(--diagram-accent); background: #f5f8f6; }
+.workflow-designer-page :deep(.subprocess-manage-link:focus-visible) { outline: 2px solid var(--diagram-accent); outline-offset: 2px; }
+.workflow-designer-page :deep(.subprocess-manage-link > span) { margin-left: 5px; color: #778b80; }
 .workflow-designer-page :deep(.wfd) { height: auto; min-height: 0; flex: 1; border: 0; border-radius: 0; }
-.workflow-designer-page :deep(.wfd-toolbar) { display: flex; flex: 0 0 49px; min-height: 49px; height: 49px; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--color-border); }
+.workflow-designer-page :deep(.wfd-toolbar) { display: flex; flex: 0 0 auto; min-height: 54px; height: auto; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
 .workflow-designer-page :deep(.wfd-brand) { display: none; }
-.workflow-designer-page :deep(.wfd-toolbar-actions) { width: 100%; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.workflow-designer-page :deep(.wfd-toolbar-actions) { width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 6px; overflow: visible; }
+.workflow-designer-page :deep(.wfd-toolbar-spacer) { display: none; }
 .workflow-designer-page :deep(.wfd-button) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 35px; min-height: 35px; padding: 0 10px; border-radius: 5px; color: #455b4e; font-size: 12px !important; white-space: nowrap; }
 .workflow-designer-page :deep(.wfd-button:hover:not(:disabled)) { border-color: #bdd5cf; color: var(--diagram-accent); background: #f5f8f6; }
 .workflow-designer-page :deep(.wfd-button-primary), .workflow-designer-page :deep(.wfd-button-primary:hover:not(:disabled)) { color: white; background: var(--diagram-accent); border-color: var(--diagram-accent); }
@@ -109,11 +120,11 @@ const compile = async (model: WorkflowModel) => {
 .workflow-designer-page :deep(.wfd-workspace.wfd-library-collapsed.wfd-properties-collapsed) { grid-template-columns: 54px minmax(0, 1fr) 54px; }
 .workflow-designer-page :deep(.wfd-library), .workflow-designer-page :deep(.wfd-inspector) { padding: 12px; }
 .workflow-designer-page :deep(.wfd-section-heading) { min-height: 42px; margin: 0 0 10px; }
-.workflow-designer-page :deep(.wfd-panel-toggle) { width: 40px; height: 40px; flex-basis: 40px; color: #506c5f; border-color: #e0e8e3; background: #fff; }
+.workflow-designer-page :deep(.wfd-panel-toggle) { width: 32px; min-width: 32px; height: 32px; flex-basis: 32px; padding: 0; color: #506c5f; border-color: #e0e8e3; background: #fff; }
 .workflow-designer-page :deep(.wfd-panel-toggle:hover) { color: var(--diagram-accent); border-color: #bdd5cf; background: #f4f8f5; }
-.workflow-designer-page :deep(.wfd-panel-toggle .tabler-icon) { width: 21px; height: 21px; stroke-width: 1.8; }
+.workflow-designer-page :deep(.wfd-panel-toggle .tabler-icon) { width: 16px; height: 16px; stroke-width: 1.8; }
 .workflow-designer-page :deep(.wfd-library-collapsed .wfd-library), .workflow-designer-page :deep(.wfd-inspector-hidden .wfd-inspector) { padding: 8px 6px; }
-.workflow-designer-page :deep(.wfd-library-collapsed .wfd-panel-toggle), .workflow-designer-page :deep(.wfd-inspector-hidden .wfd-panel-toggle) { width: 40px; height: 40px; flex-basis: 40px; }
+.workflow-designer-page :deep(.wfd-library-collapsed .wfd-panel-toggle), .workflow-designer-page :deep(.wfd-inspector-hidden .wfd-panel-toggle) { width: 32px; min-width: 32px; height: 32px; flex-basis: 32px; }
 .workflow-designer-page :deep(.wfd-icon-button svg) { width: 17px; height: 17px; stroke-width: 1.7; }
 .workflow-designer-page :deep(.wfd-library-item) { min-height: 52px; margin-bottom: 5px; padding: 7px; border-radius: 5px; }
 .workflow-designer-page :deep(.wfd-library-icon) { width: 30px; height: 30px; flex-basis: 30px; }
@@ -133,12 +144,6 @@ const compile = async (model: WorkflowModel) => {
   .workflow-designer-page :deep(.wfd-workspace.wfd-library-collapsed) { grid-template-columns: 48px minmax(0, 1fr) 268px; }
   .workflow-designer-page :deep(.wfd-workspace.wfd-properties-collapsed) { grid-template-columns: 58px minmax(0, 1fr) 48px; }
   .workflow-designer-page :deep(.wfd-workspace.wfd-library-collapsed.wfd-properties-collapsed) { grid-template-columns: 48px minmax(0, 1fr) 48px; }
-}
-@media (max-width: 1200px) {
-  .workflow-designer-page :deep(.wfd-button > span) { display: none; }
-  .workflow-designer-page :deep(.wfd-button) { width: 36px; padding: 0; }
-  .workflow-designer-page :deep(.wfd-button-primary) { width: 36px; }
-  .workflow-designer-page :deep(.wfd-toolbar-actions) { overflow-x: visible; }
 }
 @media (max-width: 820px) {
   .workflow-designer-page :deep(.wfd) { flex: 0 0 auto; min-height: 0; overflow: visible; }

@@ -12,10 +12,10 @@ import WorkflowEdge from './edges/WorkflowEdge.vue'
 import { getWorkflowNodeDefinition, workflowNodeCatalog } from './nodes'
 import { workflowTemplates } from './templates'
 import { createWorkflowEditSession, type WorkflowEditSnapshot } from './edit-session'
-import type { WorkflowCompile, WorkflowDeploy, WorkflowDesignDocument, WorkflowDesignerExtensions, WorkflowInput, WorkflowModel, WorkflowNodeRecord, WorkflowNodeType, WorkflowValidationIssue, WorkflowVerifyDeployment, WorkflowViewport } from './types'
+import type { WorkflowCompile, WorkflowDeploy, WorkflowDesignDocument, WorkflowDesignerExtensions, WorkflowDesignerMode, WorkflowInput, WorkflowModel, WorkflowNodeRecord, WorkflowNodeType, WorkflowSubProcessModel, WorkflowValidationIssue, WorkflowVerifyDeployment, WorkflowViewport } from './types'
 import './style.css'
 
-const props = withDefaults(defineProps<{ modelValue?: WorkflowInput; compile?: WorkflowCompile; deploy?: WorkflowDeploy; verifyDeployment?: WorkflowVerifyDeployment; readonly?: boolean; autoLayoutOnInit?: boolean; extensions?: WorkflowDesignerExtensions }>(), { readonly: false, autoLayoutOnInit: false })
+const props = withDefaults(defineProps<{ modelValue?: WorkflowInput; compile?: WorkflowCompile; deploy?: WorkflowDeploy; verifyDeployment?: WorkflowVerifyDeployment; readonly?: boolean; autoLayoutOnInit?: boolean; mode?: WorkflowDesignerMode; extensions?: WorkflowDesignerExtensions }>(), { readonly: false, autoLayoutOnInit: false, mode: 'workflow' })
 const emit = defineEmits<{ 'update:modelValue': [value: WorkflowDesignDocument | Record<string, unknown>]; 'compile-start': []; 'compile-success': [result: unknown]; 'compile-error': [error: unknown] }>()
 const nodeTypes = workflowNodeCatalog
 const sample: WorkflowModel = {
@@ -43,7 +43,7 @@ const edges = shallowRef<DesignerEdge[]>(initialCanvas.edges)
 const zoom = ref(initial.editor.viewport?.zoom ?? 1)
 const activeNodeId = ref<string>()
 const activeEdgeId = ref<string>()
-const issues = ref<WorkflowValidationIssue[]>(validateWorkflowModel(initial.model, props.extensions?.validate?.(initial.model) ?? []))
+const issues = ref<WorkflowValidationIssue[]>(validateForMode(initial.model))
 const compileState = ref<'idle' | 'loading' | 'success' | 'error'>('idle')
 const compileResult = ref<unknown>()
 const compileError = ref('')
@@ -89,7 +89,7 @@ const selectedNode = computed(() => nodes.value.find((node: DesignerNode) => nod
 const selectedEdge = computed(() => edges.value.find((edge: DesignerEdge) => edge.id === activeEdgeId.value))
 const reminderTargetNodes = computed(() => model.value.nodes.filter(node => {
   const type = getWorkflowNodeDefinition(node.type)?.type
-  return node.id !== selectedNode.value?.id && type && ['approval', 'countersign', 'service'].includes(type)
+  return node.id !== selectedNode.value?.id && type && ['approval', 'countersign', 'service', 'subProcess'].includes(type)
 }))
 const readonlyMode = computed(() => props.readonly || originalReadonly.value)
 const model = computed(() => fromCanvas(nodes.value, edges.value, baseModel()))
@@ -106,7 +106,10 @@ const deploySummary = computed(() => {
   ]
 })
 const themeVariables = computed(() => Object.fromEntries(Object.entries({ ...(editorState.value.theme ?? {}), ...(props.extensions?.theme ?? {}) }).map(([key, value]) => [key.startsWith('--') ? key : '--wfd-' + key.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase()), value])))
-const nodeOptions = computed(() => nodeTypes.filter(item => (props.extensions?.nodeTypes ?? nodeTypes.map(node => node.type)).includes(item.type)))
+const nodeOptions = computed(() => {
+  const allowed = props.extensions?.nodeTypes ?? nodeTypes.map(node => node.type)
+  return nodeTypes.filter(item => allowed.includes(item.type))
+})
 const nodeGroups = computed(() => {
   const groups = new Map<string, Array<(typeof nodeOptions.value)[number]>>()
   for (const node of nodeOptions.value) {
@@ -117,6 +120,9 @@ const nodeGroups = computed(() => {
 })
 
 function baseModel(): WorkflowModel { const value = documentState.value as Partial<WorkflowDesignDocument>; return value.model && Array.isArray(value.model.nodes) ? value.model as WorkflowModel : initial.model }
+function validateForMode(value: WorkflowModel): WorkflowValidationIssue[] {
+  return props.mode === 'subprocess-fragment' ? validateFragmentModel(value) : validateWorkflowModel(value, props.extensions?.validate?.(value) ?? [])
+}
 function currentEditor() {
   const routes = Object.fromEntries(edges.value.flatMap((edge, index) => {
     const points = (edge.data as typeof edge.data & { routePoints?: { x: number; y: number }[] } | undefined)?.routePoints
@@ -178,10 +184,14 @@ function applyDocument(input: WorkflowInput) {
   zoom.value = parsed.editor.viewport?.zoom ?? 1
   unknownPaths.value = parsed.unknownPaths; unsupportedEnvelope.value = parsed.unsupportedEnvelope; originalReadonly.value = parsed.readonly
   activeNodeId.value = undefined; activeEdgeId.value = undefined
-  issues.value = validateWorkflowModel(parsed.model, props.extensions?.validate?.(parsed.model) ?? [])
+  issues.value = validateForMode(parsed.model)
   compileState.value = 'idle'; compileResult.value = undefined; compileError.value = ''
   nextTick(() => { if (parsed.editor.viewport) void setViewport(parsed.editor.viewport) })
 }
+watch(() => [props.mode, props.extensions?.nodeTypes], () => {
+  nodeLibraryCollapsed.value = false
+  propertiesPanelCollapsed.value = false
+})
 watch(() => props.modelValue, value => {
   if (loadingInput.value || value === undefined) return
   const serialized = JSON.stringify(value)
@@ -196,7 +206,7 @@ watch(() => props.modelValue, value => {
 function updateDocument(recordHistory = true) {
   if (loadingInput.value || unsupportedEnvelope.value) return
   documentState.value = { ...(documentState.value as Record<string, unknown>), format: 'workflow-designer', version: 1, model: model.value, editor: currentEditor() }
-  issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? [])
+  issues.value = validateForMode(model.value)
   unknownPaths.value = parseWorkflowInput(currentDocument()).unknownPaths
   compileState.value = 'idle'; compileError.value = ''; publishDocument()
   if (recordHistory && !draggingNodes.value) commitHistory()
@@ -207,7 +217,7 @@ function publishDocument() {
   if (emittedDocuments.size > 32) emittedDocuments.delete(emittedDocuments.values().next().value!)
   emit('update:modelValue', value)
 }
-watch(() => props.extensions?.validate, () => { issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? []) })
+watch(() => [props.extensions?.validate, props.mode], () => { issues.value = validateForMode(model.value) })
 function pushHistory() {
   if (!editSession.hasBaseline) {
     editSession.ensureBaseline(editSnapshot())
@@ -241,6 +251,10 @@ function getRecord(id: string) { return model.value.nodes.find(item => item.id =
 function updateNode(id: string, key: string, value: unknown) {
   if (readonlyMode.value) return
   const node = nodes.value.find(item => item.id === id); if (!node) return
+  if (key === 'timerType' && node.data.kind === 'timer') {
+    updateTimerType(id, value as 'duration' | 'date' | 'cycle')
+    return
+  }
   nodes.value = nodes.value.map(item => {
     if (item.id !== id) return item
     if (key === 'name') return { ...item, data: { ...item.data, name: String(value) } }
@@ -256,11 +270,31 @@ function updateNode(id: string, key: string, value: unknown) {
       delete custom.approveMode; delete original.approveMode
       delete custom.sequential; delete original.sequential
       delete custom.passRate; delete original.passRate
+    } else if (key === 'subProcessSelection') {
+      const selection = value && typeof value === 'object' ? value as { key?: unknown; name?: unknown; process?: unknown } : undefined
+      if (!selection) {
+        delete custom.subProcessKey; delete custom.subProcessName; delete custom.process
+        delete original.subProcessKey; delete original.subProcessName; delete original.process
+      } else {
+        custom.subProcessKey = selection.key; custom.subProcessName = selection.name; custom.process = selection.process
+        original.subProcessKey = selection.key as string; original.subProcessName = selection.name as string; original.process = selection.process as WorkflowSubProcessModel
+      }
     } else if (key === 'reminder' && value && typeof value === 'object') {
       const reminder = Object.fromEntries(Object.entries(value).filter(([, entry]) => String(entry ?? '').trim()))
       custom.reminder = reminder; original.reminder = reminder
     } else if (key === 'reminder') {
       delete custom.reminder; delete original.reminder
+    } else if (key === 'reminderAction' || key === 'reminderTarget') {
+      const reminder = { ...(original.reminder ?? {}) }
+      if (key === 'reminderAction') {
+        reminder.action = value as 'notify' | 'return' | 'end'
+        if (value !== 'return') delete reminder.target
+      } else {
+        reminder.target = String(value ?? '')
+      }
+      const nextReminder = Object.fromEntries(Object.entries(reminder).filter(([, entry]) => String(entry ?? '').trim()))
+      if (Object.keys(nextReminder).length) { custom.reminder = nextReminder; original.reminder = nextReminder }
+      else { delete custom.reminder; delete original.reminder }
     } else if (value === '' || value === undefined || value === null) { delete custom[key]; delete original[key] }
     else {
       const nextValue = key === 'passRate' && typeof value === 'string' ? value.trim() : value
@@ -268,14 +302,11 @@ function updateNode(id: string, key: string, value: unknown) {
       else { custom[key] = nextValue; original[key] = nextValue as never }
     }
     if (key === 'approveMode' && value !== 'VOTE') { delete custom.passRate; delete original.passRate }
-    return { ...item, data: { ...item.data, custom, original } }
+    return key === 'subProcessSelection' && value && typeof value === 'object'
+      ? { ...item, data: { ...item.data, name: String((value as { name?: unknown }).name ?? item.data.name), custom, original } }
+      : { ...item, data: { ...item.data, custom, original } }
   })
   updateDocument()
-}
-function updateReminder(id: string, key: 'action' | 'target', value: string) {
-  const reminder = getRecord(id)?.reminder
-  if (!reminder) return
-  updateNode(id, 'reminder', { ...reminder, [key]: value, ...(key === 'action' && value !== 'return' ? { target: '' } : {}) })
 }
 function updateTimerType(id: string, timerType: 'duration' | 'date' | 'cycle') {
   if (readonlyMode.value) return
@@ -435,8 +466,8 @@ function importJsonToCanvas() {
 }
 async function compileModel(candidate: WorkflowModel = model.value, openXml = true) {
   const isCurrent = JSON.stringify(candidate) === JSON.stringify(model.value)
-  const candidateIssues = validateWorkflowModel(candidate, props.extensions?.validate?.(candidate) ?? [])
-  if (!props.compile || (isCurrent && !canCompile.value) || candidateIssues.length || parseWorkflowInput(candidate).unknownPaths.length) {
+  const candidateIssues = validateForMode(candidate)
+  if (props.mode === 'subprocess-fragment' || !props.compile || (isCurrent && !canCompile.value) || candidateIssues.length || parseWorkflowInput(candidate).unknownPaths.length) {
     issues.value = candidateIssues
     checkOpen.value = true
     return undefined
@@ -473,8 +504,35 @@ function downloadXml() {
   link.href = URL.createObjectURL(blob); link.download = (model.value.processId || 'workflow') + '.bpmn'; link.click(); URL.revokeObjectURL(link.href)
 }
 function runCheck() {
-  issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? [])
+  issues.value = validateForMode(model.value)
   checkOpen.value = true
+}
+function validateFragmentModel(value: WorkflowModel): WorkflowValidationIssue[] {
+  const result: WorkflowValidationIssue[] = []
+  if (value.nodes.length === 0) result.push({ code: 'fragment-empty', message: '片段至少需要一个节点。' })
+  const ids = new Set<string>()
+  for (const node of value.nodes) {
+    if (!node.id.trim() || ids.has(node.id)) result.push({ code: 'fragment-node-id', message: `节点标识为空或重复：${node.id}`, nodeId: node.id })
+    ids.add(node.id)
+    if (!node.name.trim()) result.push({ code: 'fragment-node-name', message: '请填写节点名称。', nodeId: node.id })
+    if (!['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'].includes(node.type)) result.push({ code: 'fragment-node-type', message: `子流程片段不支持“${node.type}”节点。`, nodeId: node.id })
+    else result.push(...(getWorkflowNodeDefinition(node.type)?.checkValid?.(node) ?? []).map(issue => node.type === 'subProcess'
+      ? { ...issue, nodeId: node.id, locationLabel: [node.name, issue.locationLabel].filter(Boolean).join(' › ') }
+      : issue))
+  }
+  for (const [index, flow] of value.flows.entries()) {
+    if (!ids.has(flow.source) || !ids.has(flow.target)) result.push({ code: 'fragment-flow-reference', message: '连线引用了片段内不存在的节点。', edgeId: `flow-${index}` })
+    if (flow.source === flow.target) result.push({ code: 'fragment-self-link', message: '节点不能连接到自身。', edgeId: `flow-${index}` })
+  }
+  for (const node of value.nodes) {
+    if (node.type === 'start' && value.flows.some(flow => flow.target === node.id)) result.push({ code: 'fragment-start-incoming', message: '片段开始节点不能有上游连线。', nodeId: node.id })
+    if (node.type === 'end' && value.flows.some(flow => flow.source === node.id)) result.push({ code: 'fragment-end-outgoing', message: '片段结束节点不能有后续连线。', nodeId: node.id })
+  }
+  for (const node of value.nodes.filter(item => item.type === 'condition')) {
+    const next = value.flows.filter(flow => flow.source === node.id)
+    if (next.length < 2) result.push({ code: 'fragment-condition-branches', message: `“${node.name}”至少需要两条候选路径。`, nodeId: node.id })
+  }
+  return result.map(issue => ({ ...issue, ...(issue.locationLabel ? {} : issue.nodeId ? { locationLabel: value.nodes.find(node => node.id === issue.nodeId)?.name ?? issue.nodeId } : {}) }))
 }
 function openDeploy() { deployState.value = 'idle'; deployResult.value = undefined; deployError.value = ''; deployOpen.value = true }
 async function deployWorkflow() {
@@ -515,9 +573,9 @@ function onKeydown(event: KeyboardEvent) {
   else if (!editing && (event.key === 'Delete' || event.key === 'Backspace') && (activeNodeId.value || activeEdgeId.value)) { event.preventDefault(); removeSelection() }
 }
 function safeJson(value: unknown) { return JSON.stringify(value, null, 2) }
-onMounted(() => { document.addEventListener('keydown', onKeydown); issues.value = validateWorkflowModel(model.value, props.extensions?.validate?.(model.value) ?? []); if (!editSession.hasBaseline && !shouldAutoLayoutOnInit) resetHistory() })
+onMounted(() => { document.addEventListener('keydown', onKeydown); issues.value = validateForMode(model.value); if (!editSession.hasBaseline && !shouldAutoLayoutOnInit) resetHistory() })
 onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
-defineExpose({ compile: compileModel, exportDesign: currentDocument })
+defineExpose({ compile: compileModel, exportDesign: currentDocument, validate: () => validateForMode(model.value), check: runCheck })
 </script>
 
 <template>
@@ -528,28 +586,24 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument })
         <div class="wfd-brand-copy"><strong>业务流程设计</strong><small :title="model.processId">{{ model.processName || '未命名流程' }} · {{ model.nodes.length }} 个节点</small></div>
       </div>
       <div class="wfd-toolbar-actions">
-        <slot name="toolbar-start" :document="currentDocument()" />
-        <div class="wfd-tool-group" aria-label="编辑历史">
-          <button class="wfd-button wfd-icon-button" type="button" :disabled="!canUndo || readonlyMode" aria-label="撤销" title="撤销 (Ctrl+Z)" @click="undo"><IconArrowBackUp :size=17 /></button>
-          <button class="wfd-button wfd-icon-button" type="button" :disabled="!canRedo || readonlyMode" aria-label="重做" title="重做 (Ctrl+Y)" @click="redo"><IconArrowForwardUp :size=17 /></button>
-        </div>
-        <span class="wfd-toolbar-divider" />
-        <div class="wfd-tool-group" aria-label="编排工具">
-          <button class="wfd-button" type="button" :disabled="readonlyMode" @click="autoLayout()"><IconWand :size=16 /><span>自动布局</span></button>
+        <span v-if="props.mode !== 'subprocess-fragment'" class="wfd-toolbar-spacer" aria-hidden="true" />
+        <span v-if="props.mode !== 'subprocess-fragment'" class="wfd-toolbar-divider" />
+        <div v-if="props.mode !== 'subprocess-fragment'" class="wfd-tool-group" aria-label="编排工具">
           <button class="wfd-button" type="button" :disabled="readonlyMode" @click="templateOpen = true"><IconTemplate :size=16 /><span>流程模板</span></button>
         </div>
-        <span class="wfd-toolbar-divider" />
-        <div class="wfd-tool-group" aria-label="流程数据">
+        <span v-if="props.mode !== 'subprocess-fragment'" class="wfd-toolbar-divider" />
+        <div v-if="props.mode !== 'subprocess-fragment'" class="wfd-tool-group" aria-label="流程数据">
           <button class="wfd-button" type="button" @click="jsonViewOpen = true"><IconCode :size=16 /><span>查看业务 JSON</span></button>
           <button class="wfd-button" type="button" :disabled="readonlyMode" @click="openImportJson"><IconFileImport :size=16 /><span>导入 / 转换 JSON</span></button>
           <button class="wfd-button" type="button" :disabled="!canCompile" @click="compileModel()"><IconCode :size=16 /><span>{{ compileState === 'loading' ? '编译中…' : '生成 BPMN XML' }}</span></button>
-          <button class="wfd-button" type="button" @click="runCheck"><IconChecklist :size=16 /><span>检查流程</span></button>
           <button class="wfd-button" type="button" @click="exportToFile"><IconDownload :size=16 /><span>导出设计稿</span></button>
         </div>
         <div class="wfd-tool-group wfd-publish-action">
           <button v-if="props.deploy" class="wfd-button wfd-button-primary" type="button" :disabled="!canDeploy" @click="openDeploy"><IconCloudUpload :size=16 /><span>发布任务模板</span></button>
         </div>
-        <slot name="toolbar-end" :document="currentDocument()" /><input ref="fileInput" class="wfd-visually-hidden" type="file" accept="application/json,.json" @change="onFileSelected">
+        <span v-if="props.mode !== 'subprocess-fragment'" class="wfd-toolbar-spacer" aria-hidden="true" />
+        <slot name="toolbar-end" :document="currentDocument()" />
+        <input ref="fileInput" class="wfd-visually-hidden" type="file" accept="application/json,.json" @change="onFileSelected">
       </div>
     </header>
     <div v-if="templateOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="templateOpen = false"><section class="wfd-dialog wfd-dialog-template" role="dialog" aria-modal="true" aria-labelledby="wfd-template-title"><header><div><h2 id="wfd-template-title">流程模板</h2><p>使用模板会替换当前业务流程，可通过撤销恢复；模型由 WorkflowModel JSON 描述。</p></div><button type="button" aria-label="关闭" @click="templateOpen = false">×</button></header><div class="wfd-template-options" role="radiogroup" aria-label="选择流程模板"><label v-for="item in workflowTemplates" :key="item.id" class="wfd-template-option" :class="{ 'is-selected': selectedTemplateId === item.id }"><input v-model="selectedTemplateId" type="radio" name="workflow-template" :value="item.id"><span class="wfd-template-icon" :class="'wfd-tone-' + item.model.nodes[1]?.type" aria-hidden="true" v-html="templateIcons[item.model.nodes[1]?.type === 'countersign' ? 'plus' : item.model.nodes[1]?.type === 'service' ? 'service' : item.model.nodes.some(node => node.type === 'condition') ? 'branch' : 'user']"></span><span class="wfd-template-copy"><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span><span class="wfd-template-mark" aria-hidden="true">{{ selectedTemplateId === item.id ? '✓' : '' }}</span></label></div><div class="wfd-template-preview"><div><span>流程标识</span><code>{{ selectedTemplate.model.processId }}</code></div><div><span>节点 / 连线</span><code>{{ selectedTemplate.model.nodes.length }} / {{ selectedTemplate.model.flows.length }}</code></div><div><span>多人审批</span><code>{{ selectedTemplate.model.nodes.find(node => node.type === 'countersign')?.approveMode ?? '—' }}</code></div><div v-if="selectedTemplate.sourceProcessDefinitionId"><span>来源流程定义</span><code>{{ selectedTemplate.sourceProcessDefinitionId }}</code></div></div><footer><button class="wfd-button" type="button" @click="templateOpen = false">取消</button><button class="wfd-button" type="button" @click="jsonDraft = safeJson(selectedTemplate.model); jsonImportOpen = true; templateOpen = false">查看 JSON</button><button class="wfd-button wfd-button-primary" type="button" :disabled="readonlyMode" @click="applyTemplate">使用模板</button></footer></section></div>
@@ -560,47 +614,39 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument })
     <div v-if="deployOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="deployState !== 'loading' && (deployOpen = false)"><section class="wfd-dialog wfd-dialog-check" role="dialog" aria-modal="true" aria-labelledby="wfd-deploy-title"><header><div><h2 id="wfd-deploy-title">{{ deployState === 'success' ? '任务模板发布完成' : '发布任务模板' }}</h2><p>{{ deployState === 'success' ? '后端已完成任务模板发布，可到业务流程页发起。' : '确认后会调用宿主提供的发布接口，将当前流程发布为可发起的业务任务模板。' }}</p></div><button v-if="deployState !== 'loading'" type="button" aria-label="关闭" @click="deployOpen = false">×</button></header><div v-if="deployState === 'success'" class="wfd-deploy-result"><p v-for="item in deploySummary" :key="item.label"><span>{{ item.label }}</span><code>{{ item.value }}</code></p></div><div v-else-if="deployState === 'error'" class="wfd-dialog-error" role="alert">{{ deployError }}</div><div v-else class="wfd-deploy-summary"><p><span>流程标识</span><code>{{ model.processId }}</code></p><p><span>流程名称</span><code>{{ model.processName }}</code></p><p><span>发布前检查</span><code>{{ allIssues.length ? '发现 ' + allIssues.length + ' 项问题' : '通过' }}</code></p></div><footer><button v-if="deployUncertain && deployState === 'error' && props.verifyDeployment" class="wfd-button" type="button" :disabled="verifyingDeployment" @click="verifyDeployment">{{ verifyingDeployment ? '正在查询…' : '查询发布状态' }}</button><button v-if="deployState !== 'loading'" class="wfd-button" type="button" @click="deployOpen = false">{{ deployState === 'success' ? '完成' : '取消' }}</button><button v-if="deployState !== 'success'" class="wfd-button wfd-button-primary" type="button" :disabled="!canDeploy || (deployUncertain && !deployVerified)" @click="deployWorkflow">{{ deployState === 'loading' ? '正在发布…' : deployState === 'error' ? '确认后重试' : '确认发布' }}</button></footer></section></div>
     <div v-if="readonlyMode" class="wfd-banner" role="status">{{ unsupportedEnvelope ? '此设计稿来自更新版本，当前以只读方式展示并保留原始数据。' : '当前设计稿处于只读模式。' }}</div>
     <div v-if="importError || viewError" class="wfd-alert" role="alert">{{ importError || viewError }}</div>
-    <div v-if="allIssues.length" class="wfd-validation-summary" role="status"><strong>{{ unknownPaths.length ? '包含未识别数据，编译已禁用' : '流程检查' }}</strong><span>{{ allIssues.length }} 项待处理</span><button v-if="allIssues[0]?.nodeId" type="button" @click="activeNodeId = allIssues[0].nodeId; activeEdgeId = undefined">定位第一项</button></div>
     <div class="wfd-workspace" :class="workspaceClasses">
-      <aside class="wfd-library" aria-label="节点库"><div class="wfd-section-heading"><span class="wfd-panel-title">节点库</span><small>点击添加步骤</small><button class="wfd-panel-toggle" type="button" :aria-expanded="!nodeLibraryCollapsed" :aria-label="nodeLibraryCollapsed ? '展开节点库' : '折叠节点库'" :title="nodeLibraryCollapsed ? '展开节点库' : '折叠节点库'" @click="togglePanel('library')"><IconLayoutSidebarLeftCollapse v-if="!nodeLibraryCollapsed" :size="20" aria-hidden="true" /><IconLayoutSidebarLeftExpand v-else :size="20" aria-hidden="true" /></button></div>
+      <aside class="wfd-library" aria-label="节点库"><div class="wfd-section-heading"><span class="wfd-panel-title">节点库</span><button class="wfd-panel-toggle" type="button" :aria-expanded="!nodeLibraryCollapsed" :aria-label="nodeLibraryCollapsed ? '展开节点库' : '折叠节点库'" :title="nodeLibraryCollapsed ? '展开节点库' : '折叠节点库'" @click="togglePanel('library')"><IconLayoutSidebarLeftCollapse v-if="!nodeLibraryCollapsed" :size="17" aria-hidden="true" /><IconLayoutSidebarLeftExpand v-else :size="17" aria-hidden="true" /></button></div>
         <section v-for="group in nodeGroups" :key="group.title" class="wfd-library-group"><h3>{{ group.title }}</h3><button v-for="item in group.items" :key="item.type" class="wfd-library-item" type="button" :disabled="readonlyMode" :draggable="!readonlyMode" @dragstart="onLibraryDragStart($event, item.type)" @click="addNode(item.type)"><span class="wfd-library-icon" :class="'wfd-tone-' + item.type" aria-hidden="true"><component :is="item.icon" :size="17" /></span><span><strong>{{ item.title }}</strong><small>{{ item.description }}</small></span><IconPlus class="wfd-plus" :size="16" aria-hidden="true" /></button></section>
         <slot name="node-library-footer" />
       </aside>
       <main class="wfd-canvas-wrap" aria-label="流程画布" @dragover.prevent @drop.prevent="onCanvasDrop">
-      <VueFlow :id="flowId" v-model:nodes="nodes" v-model:edges="edges" class="wfd-flow" :node-types="nodeTypesMap" :edge-types="edgeTypesMap" :nodes-draggable="!readonlyMode" :nodes-connectable="!readonlyMode" :edges-updatable="!readonlyMode" :elements-selectable="true" :fit-view-on-init="!shouldAutoLayoutOnInit && !editorState.viewport" :min-zoom="0.2" :max-zoom="2.2" @init="handleFlowInit" @nodes-initialized="handleNodesInitialized" @connect="handleConnect" @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-start="onDragStart" @node-drag-stop="onDragStop" @move-end="onViewportChange">
-        </VueFlow>
-        <div class="wfd-canvas-caption" aria-hidden="true"><span class="wfd-canvas-caption-mark" /><strong>流程画布</strong><small>选择节点编辑属性，拖动连接点建立流转</small></div>
-        <div v-if="!nodes.length" class="wfd-empty-canvas"><strong>从一个节点开始</strong><span>使用左侧节点库添加步骤，再拖动节点间的连接点。</span></div>
-        <div class="wfd-canvas-legend" aria-hidden="true"><span class="wfd-dot" />通过路径<span class="wfd-dot wfd-dot-reject" />驳回回流</div>
-        <div class="wfd-canvas-actions"><button type="button" aria-label="缩小" title="缩小" @click="zoomOut()">−</button><span>{{ Math.round(zoom * 100) }}%</span><button type="button" aria-label="放大" title="放大" @click="zoomIn()">+</button><i /><button type="button" aria-label="适应画布" title="适应画布" @click="fitView({ padding: 0.18 })">适应</button></div><slot name="canvas-overlay" :issues="allIssues" />
+        <div class="wfd-canvas-toolbar">
+          <div class="wfd-canvas-tool-group" aria-label="编辑历史">
+            <button class="wfd-canvas-tool-button" type="button" :disabled="!canUndo || readonlyMode" aria-label="撤销" title="撤销 (Ctrl+Z)" @click="undo"><IconArrowBackUp :size="17" aria-hidden="true" /></button>
+            <button class="wfd-canvas-tool-button" type="button" :disabled="!canRedo || readonlyMode" aria-label="重做" title="重做 (Ctrl+Y)" @click="redo"><IconArrowForwardUp :size="17" aria-hidden="true" /></button>
+          </div>
+          <div v-if="props.mode !== 'subprocess-fragment'" class="wfd-canvas-tool-group" aria-label="画布操作">
+            <button class="wfd-canvas-tool-button wfd-canvas-tool-labelled" type="button" :disabled="readonlyMode || !nodes.length" title="自动排列当前流程" @click="autoLayout()"><IconWand :size="16" aria-hidden="true" /><span>自动布局</span></button>
+            <button class="wfd-canvas-check" :class="allIssues.length ? 'is-warning' : 'is-valid'" type="button" :aria-label="allIssues.length ? '检查流程，发现 ' + allIssues.length + ' 项待处理' : '检查流程，通过'" :title="allIssues.length ? '查看并定位流程问题' : '流程检查通过，点击查看详情'" @click="runCheck"><IconChecklist :size="13" aria-hidden="true" /><span>{{ allIssues.length ? allIssues.length + ' 项待处理' : '检查通过' }}</span></button>
+          </div>
+        </div>
+        <div class="wfd-canvas-stage">
+          <VueFlow :id="flowId" v-model:nodes="nodes" v-model:edges="edges" class="wfd-flow" :node-types="nodeTypesMap" :edge-types="edgeTypesMap" :nodes-draggable="!readonlyMode" :nodes-connectable="!readonlyMode" :edges-updatable="!readonlyMode" :elements-selectable="true" :fit-view-on-init="!shouldAutoLayoutOnInit && !editorState.viewport" :min-zoom="0.2" :max-zoom="2.2" @init="handleFlowInit" @nodes-initialized="handleNodesInitialized" @connect="handleConnect" @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-start="onDragStart" @node-drag-stop="onDragStop" @move-end="onViewportChange">
+          </VueFlow>
+          <div class="wfd-canvas-caption" aria-hidden="true"><span class="wfd-canvas-caption-mark" /><strong>流程画布</strong><small>选择节点编辑属性，拖动连接点建立流转</small></div>
+          <div v-if="!nodes.length" class="wfd-empty-canvas"><strong>从一个节点开始</strong><span>使用左侧节点库添加步骤，再拖动节点间的连接点。</span></div>
+          <div class="wfd-canvas-legend" aria-hidden="true"><span class="wfd-dot" />通过路径<span class="wfd-dot wfd-dot-reject" />驳回回流</div>
+          <div class="wfd-canvas-actions"><button type="button" aria-label="缩小画布" title="缩小画布" @click="zoomOut()">−</button><span>{{ Math.round(zoom * 100) }}%</span><button type="button" aria-label="放大画布" title="放大画布" @click="zoomIn()">+</button><i /><button type="button" aria-label="适应画布" title="适应画布" @click="fitView({ padding: 0.18 })">适应</button></div><slot name="canvas-overlay" :issues="allIssues" />
+        </div>
       </main>
-      <aside class="wfd-inspector" aria-label="属性面板"><div class="wfd-section-heading"><button class="wfd-panel-toggle" type="button" :aria-expanded="!propertiesPanelCollapsed" :aria-label="propertiesPanelCollapsed ? '展开属性面板' : '折叠属性面板'" :title="propertiesPanelCollapsed ? '展开属性面板' : '折叠属性面板'" @click="togglePanel('properties')"><IconLayoutSidebarRightCollapse v-if="!propertiesPanelCollapsed" :size="20" aria-hidden="true" /><IconLayoutSidebarRightExpand v-else :size="20" aria-hidden="true" /></button><span class="wfd-panel-title">{{ selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '流程属性' }}</span><button v-if="(selectedNode || selectedEdge) && !readonlyMode" class="wfd-text-danger" type="button" @click="removeSelection">删除</button></div>
+      <aside class="wfd-inspector" aria-label="属性面板"><div class="wfd-section-heading"><button class="wfd-panel-toggle" type="button" :aria-expanded="!propertiesPanelCollapsed" :aria-label="propertiesPanelCollapsed ? '展开属性面板' : '折叠属性面板'" :title="propertiesPanelCollapsed ? '展开属性面板' : '折叠属性面板'" @click="togglePanel('properties')"><IconLayoutSidebarRightCollapse v-if="!propertiesPanelCollapsed" :size="17" aria-hidden="true" /><IconLayoutSidebarRightExpand v-else :size="17" aria-hidden="true" /></button><span class="wfd-panel-title">{{ selectedNode ? '节点属性' : selectedEdge ? '连线属性' : '流程属性' }}</span><button v-if="(selectedNode || selectedEdge) && !readonlyMode" class="wfd-text-danger" type="button" @click="removeSelection">删除</button></div>
           <template v-if="selectedNode"><div class="wfd-selected-kind"><span class="wfd-library-icon" :class="'wfd-tone-' + selectedNode.data.kind" aria-hidden="true"><component :is="props.extensions?.nodeComponent ? undefined : nodeTypes.find(item => item.type === selectedNode?.data.kind)?.icon" :size="17" /></span><span><strong>{{ nodeTypes.find(item => item.type === selectedNode?.data.kind)?.title ?? '未知节点' }}</strong><small>{{ selectedNode.id }}</small></span></div>
           <component v-if="props.extensions?.nodePropertyEditors?.[selectedNode.data.kind as WorkflowNodeType]" :is="props.extensions.nodePropertyEditors[selectedNode.data.kind as WorkflowNodeType]" :model="getRecord(selectedNode.id)" :readonly="readonlyMode" :update="(key: string, value: unknown) => updateNode(selectedNode!.id, key, value)" />
           <template v-else-if="nodeTypes.some(item => item.type === selectedNode?.data.kind)">
             <label class="wfd-field"><span>节点名称</span><input :value="selectedNode.data.name" :disabled="readonlyMode" @focus="pushHistory" @change="commitTextInput($event, value => updateNode(selectedNode!.id, 'name', value))"></label>
             <label class="wfd-field"><span>节点标识</span><input :value="selectedNode.id" disabled></label>
-            <template v-if="selectedNode.data.kind === 'receive'"><label class="wfd-field"><span>消息名</span><input :value="String(getRecord(selectedNode.id)?.messageName ?? '')" :disabled="readonlyMode" placeholder="留空时使用节点标识" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'messageName', ($event.target as HTMLInputElement).value)"></label><p class="wfd-field-note wfd-event-note">填写后固定为此消息名；留空时启动变量为 <code>{{ selectedNode.id }}_messageName</code>，未提供则使用节点标识。业务方发送匹配消息后流程继续，并可携带流程变量。本节点不产生人工待办。</p></template>
-            <template v-if="selectedNode.data.kind === 'timer'"><label class="wfd-field"><span>等待条件</span><select :value="String(getRecord(selectedNode.id)?.timerType ?? 'duration')" :disabled="readonlyMode" aria-label="等待条件" @focus="pushHistory" @change="updateTimerType(selectedNode!.id, ($event.target as HTMLSelectElement).value as 'duration' | 'date' | 'cycle')"><option value="duration">等待时长</option><option value="date">指定时刻</option><option value="cycle">重复周期</option></select></label><label class="wfd-field"><span>定时时间</span><input :value="String(getRecord(selectedNode.id)?.timerValue ?? '')" :disabled="readonlyMode" :placeholder="getRecord(selectedNode.id)?.timerType === 'date' ? '例如 2026-12-31T23:59:59' : getRecord(selectedNode.id)?.timerType === 'cycle' ? '例如 R3/PT10H 或 cron 表达式' : '例如 PT30M、PT2H 或 P1D'" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'timerValue', ($event.target as HTMLInputElement).value)"></label><p class="wfd-field-note wfd-event-note">{{ getRecord(selectedNode.id)?.timerType === 'date' ? '使用 ISO-8601 日期时间，例如 2026-12-31T23:59:59。' : getRecord(selectedNode.id)?.timerType === 'cycle' ? '使用 ISO-8601 重复间隔（如 R3/PT10H）或后端支持的 cron 表达式。' : '使用 ISO-8601 时长，例如 PT30M、PT2H 或 P1D。' }} 填写后固定在流程模板；留空时启动时必传 <code>{{ selectedNode.id }}_timerValue</code>，否则流程运行到此处会报错。到期后引擎自动继续，不产生待办。</p></template>
-            <template v-if="['approval', 'countersign'].includes(selectedNode.data.kind)">
-              <label class="wfd-field"><span>表单引用</span><input :value="String(getRecord(selectedNode.id)?.form ?? '')" :disabled="readonlyMode" placeholder="例如：project-form" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'form', ($event.target as HTMLInputElement).value)"></label>
-              <label v-if="selectedNode.data.kind === 'countersign'" class="wfd-field"><span>办理顺序</span><select :value="String(getRecord(selectedNode.id)?.sequential ?? false)" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'sequential', ($event.target as HTMLSelectElement).value === 'true')"><option value="false">并行办理</option><option value="true">顺序办理</option></select></label>
-              <label v-if="selectedNode.data.kind === 'countersign'" class="wfd-field"><span>审批方式</span><select :value="String(getRecord(selectedNode.id)?.approveMode ?? '')" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'approveMode', ($event.target as HTMLSelectElement).value)"><option value="">发起时选择（默认会签 ALL）</option><option value="ALL">会签 · 所有人通过（ALL）</option><option value="ANY">或签 · 任一人通过（ANY）</option><option value="VOTE">按比例通过（VOTE）</option></select></label>
-              <label v-if="selectedNode.data.kind === 'countersign' && getRecord(selectedNode.id)?.approveMode === 'VOTE'" class="wfd-field"><span>通过比例（passRate）</span><input inputmode="decimal" :value="String(getRecord(selectedNode.id)?.passRate ?? '')" :disabled="readonlyMode" placeholder="范围 (0, 1]；也可在发起时提供" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'passRate', ($event.target as HTMLInputElement).value)"></label>
-              <p v-if="selectedNode.data.kind === 'countersign'" class="wfd-field-note">多人审批字段属于节点配置；审批方式留空时，发起人可传 {{ selectedNode.id }}_approveMode，默认 ALL。比例仅用于 VOTE 模式，留空时可按节点 ID 在发起时提供。</p>
-              <details class="wfd-advanced" open><summary>超时提醒</summary><label class="wfd-field"><span>提醒状态</span><select :value="getRecord(selectedNode.id)?.reminder ? 'enabled' : 'disabled'" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'reminder', ($event.target as HTMLSelectElement).value === 'enabled' ? { duration: getRecord(selectedNode!.id)?.reminder?.duration ?? '', action: getRecord(selectedNode!.id)?.reminder?.action ?? 'notify', name: getRecord(selectedNode!.id)?.reminder?.name ?? '' } : undefined)"><option value="disabled">关闭提醒</option><option value="enabled">启用提醒</option></select></label><template v-if="getRecord(selectedNode.id)?.reminder"><label class="wfd-field"><span>超时处理方式</span><select aria-label="超时处理方式" :value="String(getRecord(selectedNode.id)?.reminder?.action ?? 'notify')" :disabled="readonlyMode" @focus="pushHistory" @change="updateReminder(selectedNode!.id, 'action', ($event.target as HTMLSelectElement).value)"><option value="notify">提醒并继续（notify）</option><option value="return">中断并退回（return）</option><option value="end">中断并结束（end）</option></select></label><label v-if="getRecord(selectedNode.id)?.reminder?.action === 'return'" class="wfd-field"><span>退回目标</span><select aria-label="超时退回目标" :value="String(getRecord(selectedNode.id)?.reminder?.target ?? '')" :disabled="readonlyMode" @focus="pushHistory" @change="updateReminder(selectedNode!.id, 'target', ($event.target as HTMLSelectElement).value)"><option value="">请选择审批或服务节点</option><option v-for="target in reminderTargetNodes" :key="target.id" :value="target.id">{{ target.name }}（{{ target.id }}）</option></select></label><label class="wfd-field"><span>提醒时长</span><input :value="String(getRecord(selectedNode.id)?.reminder?.duration ?? '')" :disabled="readonlyMode" placeholder="ISO-8601，例如 PT30M；默认 P1D" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'reminder', { ...getRecord(selectedNode!.id)?.reminder, duration: ($event.target as HTMLInputElement).value })"></label><label class="wfd-field"><span>提醒名称</span><input :value="String(getRecord(selectedNode.id)?.reminder?.name ?? '')" :disabled="readonlyMode" :placeholder="selectedNode.data.name + (getRecord(selectedNode.id)?.reminder?.action === 'return' ? '超时退回' : getRecord(selectedNode.id)?.reminder?.action === 'end' ? '超时结束' : '超时提醒')" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'reminder', { ...getRecord(selectedNode!.id)?.reminder, name: ($event.target as HTMLInputElement).value })"></label><p class="wfd-field-note">{{ getRecord(selectedNode.id)?.reminder?.action === 'return' ? '到期后取消当前审批并流转到指定节点。' : getRecord(selectedNode.id)?.reminder?.action === 'end' ? '到期后取消当前审批并结束流程。' : '到期后发送提醒消息，当前审批继续等待。' }} 留空时长可在启动实例时传 {{ selectedNode.id }}_reminderDuration，默认 P1D。</p></template></details>
-            </template>
-            <template v-if="selectedNode.data.kind === 'service'">
-              <label class="wfd-field"><span>服务名称</span><input :value="String(getRecord(selectedNode.id)?.serviceName ?? '')" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'serviceName', ($event.target as HTMLInputElement).value)"></label>
-              <label class="wfd-field"><span>服务地址</span><input :value="String(getRecord(selectedNode.id)?.serviceUrl ?? '')" :disabled="readonlyMode" placeholder="https://example.com/api" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'serviceUrl', ($event.target as HTMLInputElement).value)"></label>
-              <label class="wfd-field"><span>服务会签</span><select aria-label="服务会签" :value="getRecord(selectedNode.id)?.countersign === true ? 'enabled' : 'disabled'" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'countersign', ($event.target as HTMLSelectElement).value === 'enabled')"><option value="disabled">关闭 · 单次调用</option><option value="enabled">开启 · 多服务调用</option></select></label>
-              <template v-if="getRecord(selectedNode.id)?.countersign === true">
-                <label class="wfd-field"><span>执行顺序</span><select aria-label="服务执行顺序" :value="String(getRecord(selectedNode.id)?.sequential ?? false)" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'sequential', ($event.target as HTMLSelectElement).value === 'true')"><option value="false">并行执行</option><option value="true">顺序执行</option></select></label>
-                <label class="wfd-field"><span>会签方式</span><select aria-label="服务会签方式" :value="String(getRecord(selectedNode.id)?.approveMode ?? '')" :disabled="readonlyMode" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'approveMode', ($event.target as HTMLSelectElement).value)"><option value="">发起时选择（默认 ALL）</option><option value="ALL">会签 · 所有服务通过（ALL）</option><option value="ANY">或签 · 任一服务通过（ANY）</option><option value="VOTE">按比例通过（VOTE）</option></select></label>
-                <label v-if="getRecord(selectedNode.id)?.approveMode === 'VOTE'" class="wfd-field"><span>通过比例（passRate）</span><input inputmode="decimal" :value="String(getRecord(selectedNode.id)?.passRate ?? '')" :disabled="readonlyMode" placeholder="固定 VOTE 时必填，范围 (0, 1]" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'passRate', ($event.target as HTMLInputElement).value)"></label>
-                <p class="wfd-field-note">服务会签属性写入当前服务节点的业务 JSON。审批方式留空时按后端默认 ALL，也可在启动时提供动态值；固定为 VOTE 时必须配置通过比例。</p>
-              </template>
-            </template>
+            <label v-if="props.mode !== 'subprocess-fragment'" class="wfd-field"><span>业务标识（bizType）</span><input :value="String(getRecord(selectedNode.id)?.bizType ?? '')" :disabled="readonlyMode" placeholder="可选，供宿主业务系统识别" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'bizType', ($event.target as HTMLInputElement).value)"></label>
+          <component v-if="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :is="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :model="getRecord(selectedNode.id)" :readonly="readonlyMode" :reminder-targets="reminderTargetNodes" :subprocess-fragments="props.extensions?.subprocessFragments" :begin-edit="pushHistory" :update="(key: string, value: unknown) => updateNode(selectedNode!.id, key, value)" />
           </template><p v-else class="wfd-readonly-note">此版本无法编辑该节点。原始节点数据将在导出中保留，且不能编译。</p>
           <p class="wfd-coordinate">画布位置 <code>{{ Math.round(selectedNode.position.x) }}, {{ Math.round(selectedNode.position.y) }}</code></p>
         </template>

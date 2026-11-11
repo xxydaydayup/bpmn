@@ -9,7 +9,7 @@ const conditionNode = {
   icon: IconArrowsSplit,
   sort: 70,
   category: '流程控制',
-  availableNextTypes: ['approval', 'countersign', 'service', 'receive', 'timer', 'end'] satisfies WorkflowNodeType[],
+  availableNextTypes: ['approval', 'countersign', 'service', 'receive', 'timer', 'subProcess', 'end'] satisfies WorkflowNodeType[],
   defaultValue: { name: '条件分支' },
 } satisfies WorkflowNodeDefinition
 

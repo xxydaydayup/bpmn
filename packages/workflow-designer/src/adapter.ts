@@ -111,6 +111,7 @@ export function fromCanvas(nodes: DesignerNode[], edges: DesignerEdge[], model: 
     }),
     flows: edges.map(edge => ({
       ...(edge.data?.original ?? { source: edge.source, target: edge.target }),
+      ...(edge.data?.original?.id ? { id: edge.data.original.id } : {}),
       source: edge.source, target: edge.target,
       ...(edge.data?.branch ? { branch: edge.data.branch as WorkflowFlowRecord['branch'] } : { branch: undefined }),
       ...(edge.data?.conditionExpression !== undefined ? { conditionExpression: edge.data.conditionExpression } : {}),

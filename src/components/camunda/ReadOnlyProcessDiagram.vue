@@ -18,8 +18,24 @@ let sequence = 0
 let disposed = false
 let queue = Promise.resolve()
 let marked: string[] = []
+let fitted = false
+let fitHandle = 0
 
-function fit() { viewer?.get<Canvas>('canvas').zoom('fit-viewport') }
+function fit() {
+  if (fitHandle) { cancelAnimationFrame(fitHandle); fitHandle = 0 }
+  const canvas = viewer?.get<Canvas>('canvas')
+  const host0 = host.value
+  if (!canvas || !host0 || disposed) return
+  // dialog 打开动画期间容器可能出现宽度为 0 的布局瞬变；bpmn-js 在 0 宽下执行
+  // fit-viewport 会算出 NaN 缩放并抛出 SVGMatrix 错误，这里等布局稳定后再适配。
+  if (host0.clientWidth < 2 || host0.clientHeight < 2) {
+    fitted = false
+    fitHandle = requestAnimationFrame(() => { fitHandle = 0; fit() })
+    return
+  }
+  canvas.zoom('fit-viewport')
+  fitted = true
+}
 function highlight() {
   if (!viewer || disposed) return
   const canvas = viewer.get<Canvas>('canvas')
@@ -34,6 +50,7 @@ function render() {
   busy.value = Boolean(xml)
   error.value = ''
   warning.value = ''
+  fitted = false
   // bpmn-js 导入不支持取消，串行执行并隔离旧结果，防止同一个画布并发替换。
   queue = queue.then(async () => {
     if (disposed || request !== sequence || !viewer) return
@@ -57,13 +74,19 @@ watch(() => props.activeIds, () => { if (!busy.value) highlight() }, { deep: tru
 onMounted(() => {
   if (!host.value) return
   viewer = new NavigatedViewer({ container: host.value, moddleExtensions: { camunda: camundaDescriptor } })
-  observer = new ResizeObserver(() => { if (!disposed && !busy.value) viewer?.get<Canvas>('canvas').resized() })
+  observer = new ResizeObserver(() => {
+    if (!disposed && viewer && !busy.value) {
+      viewer.get<Canvas>('canvas').resized()
+      if (!fitted && !fitHandle) fit()
+    }
+  })
   observer.observe(host.value)
   render()
 })
 onBeforeUnmount(() => {
   disposed = true
   sequence += 1
+  if (fitHandle) { cancelAnimationFrame(fitHandle); fitHandle = 0 }
   observer?.disconnect()
   void queue.finally(() => { viewer?.destroy(); viewer = undefined })
 })

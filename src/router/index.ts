@@ -31,6 +31,12 @@ const router = createRouter({
           meta: { title: '业务工作流设计器' },
         },
         {
+          path: 'sub-processes',
+          name: 'sub-processes',
+          component: () => import('@/views/SubProcessLibraryView.vue'),
+          meta: { title: '子流程片段' },
+        },
+        {
           path: 'camunda',
           name: 'camunda',
           component: () => import('@/views/CamundaRuntimeView.vue'),

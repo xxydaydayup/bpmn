@@ -19,6 +19,7 @@ const runtime = resolveWorkflowRuntime(import.meta.env)
 const workflow = useBusinessWorkflow()
 const router = useRouter()
 const templateDetailVisible = ref(false)
+const detailOpened = ref(false)
 const consistencyLoading = ref(false)
 const consistencyError = ref('')
 const consistencyReport = ref<WorkflowConsistencyReport>()
@@ -45,6 +46,7 @@ function openTemplateDetail(row: unknown) {
 
 function closeTemplateDetail() {
   templateDetailVisible.value = false
+  detailOpened.value = false
   workflow.clearTemplateDetail()
 }
 
@@ -180,7 +182,7 @@ function consistencyTag(status: 'passed' | 'failed' | 'observed') {
 
     <ElDialog :model-value="!!workflow.reassignTargetTask.value" title="重派人工任务" width="min(520px, calc(100vw - 32px))" :close-on-click-modal="!workflow.reassigning.value" @close="workflow.closeReassign"><template v-if="workflow.reassignTargetTask.value"><ElDescriptions :column="1" border size="small"><ElDescriptionsItem label="任务">{{ workflow.reassignTargetTask.value.name || workflow.reassignTargetTask.value.id }}</ElDescriptionsItem><ElDescriptionsItem label="当前办理人">{{ workflow.reassignTargetTask.value.assignee || '未分配' }}</ElDescriptionsItem><ElDescriptionsItem label="流程实例">{{ workflow.reassignTargetTask.value.processInstanceId }}</ElDescriptionsItem></ElDescriptions><ElForm label-position="top" class="reassign-form" @submit.prevent="workflow.reassignSelectedTask"><ElFormItem label="新的办理人 userId" required><ElInput v-model="workflow.reassignUserId.value" clearable autocomplete="off" placeholder="请输入用户标识" /></ElFormItem><ElButton type="primary" :icon="Switch" :loading="workflow.reassigning.value" native-type="submit">确认重派</ElButton></ElForm></template><template #footer><ElButton :disabled="workflow.reassigning.value" @click="workflow.closeReassign">取消</ElButton></template></ElDialog>
 
-    <ElDialog :model-value="templateDetailVisible" title="当前任务模板详情" width="min(820px, calc(100vw - 32px))" @close="closeTemplateDetail">
+    <ElDialog :model-value="templateDetailVisible" title="当前任务模板详情" width="min(820px, calc(100vw - 32px))" @opened="detailOpened = true" @close="closeTemplateDetail">
       <div v-loading="workflow.templateDetailLoading.value" class="template-detail-body">
         <ElAlert v-if="workflow.templateDetailError.value" type="error" :closable="false" show-icon :title="workflow.templateDetailError.value" />
         <template v-if="workflow.templateDetail.value">
@@ -193,8 +195,8 @@ function consistencyTag(status: 'passed' | 'failed' | 'observed') {
             <ElDescriptionsItem label="描述" :span="2">{{ workflow.templateDetail.value.description || '—' }}</ElDescriptionsItem>
           </ElDescriptions>
           <div class="variable-requirements"><strong>全局变量</strong><span v-if="!workflow.templateDetail.value.globalVariables?.length">未定义</span><span v-for="item in workflow.templateDetail.value.globalVariables" :key="item.name"><code>{{ item.name }}</code> · {{ item.type }}{{ item.required ? ' · 必填' : '' }}<small v-if="item.description">{{ item.description }}</small></span></div>
-          <ReadOnlyProcessDiagram v-if="workflow.templateDetail.value.bpmnXml" :xml="workflow.templateDetail.value.bpmnXml" />
-          <ElAlert v-else type="info" :closable="false" show-icon title="当前模板没有可展示的 BPMN 流程 XML" />
+          <ReadOnlyProcessDiagram v-if="detailOpened && workflow.templateDetail.value.bpmnXml" :xml="workflow.templateDetail.value.bpmnXml" />
+          <ElAlert v-else-if="detailOpened" type="info" :closable="false" show-icon title="当前模板没有可展示的 BPMN 流程 XML" />
         </template>
       </div>
       <template #footer><ElButton @click="closeTemplateDetail">关闭</ElButton><ElButton type="primary" :icon="Edit" :disabled="!workflow.templateDetail.value?.bpmnXml" @click="editTemplate">进入设计器修改</ElButton></template>

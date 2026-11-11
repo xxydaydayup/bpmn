@@ -10,7 +10,7 @@ const model = fixture as WorkflowModel
 
 describe('WorkflowModel v1 public contract', () => {
   it('derives known runtime node types from the exhaustive built-in definitions', () => {
-    expect(WORKFLOW_NODE_TYPES).toEqual(['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'end'])
+    expect(WORKFLOW_NODE_TYPES).toEqual(['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'subProcess', 'end'])
   })
 
   it('round-trips the real project approval fixture without changing business fields, topology or coordinates', () => {
@@ -32,6 +32,46 @@ describe('WorkflowModel v1 public contract', () => {
     expect(parsed.unknownPaths).toEqual([])
     const mapped = toCanvas(parsed.model, parsed.editor)
     expect(fromCanvas(mapped.nodes, mapped.edges, parsed.model)).toEqual(model)
+  })
+
+  it('recognizes bizType as optional node metadata and preserves it through model and design document round-trips', () => {
+    const businessModel = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'apply' ? { ...node, bizType: '  procurement.request  ' } : node),
+    } as WorkflowModel
+    const parsed = parseWorkflowInput(businessModel)
+    const canvas = toCanvas(parsed.model)
+    const exported = fromCanvas(canvas.nodes, canvas.edges, parsed.model)
+    const designDocument = createDesignDocument(exported, { viewport: { x: 12, y: 28, zoom: 0.82 } })
+    const reparsed = parseWorkflowInput(designDocument)
+
+    expect(parsed.unknownPaths).toEqual([])
+    expect(reparsed.unknownPaths).toEqual([])
+    expect(reparsed.model.nodes.find(node => node.id === 'apply')?.bizType).toBe('  procurement.request  ')
+    expect(fromCanvas(toCanvas(reparsed.model).nodes, toCanvas(reparsed.model).edges, reparsed.model)).toEqual(businessModel)
+    expect(parseWorkflowInput(model).unknownPaths).toEqual([])
+  })
+
+  it('accepts recursive subProcess snapshots and reports unknown data at the nested path', () => {
+    const nested = {
+      ...model,
+      nodes: model.nodes.map(node => node.id === 'minister'
+        ? { ...node, type: 'subProcess', process: { nodes: [{ id: 'inner', type: 'approval', name: '内层审批', x: 20, y: 30, futureInner: true }], flows: [{ id: 'inner-flow', source: 'inner', target: 'inner' }] } }
+        : node),
+    } as WorkflowModel
+    const parsed = parseWorkflowInput(nested)
+    expect(parsed.unknownPaths).toContain('model.nodes[2].process.nodes[0].futureInner')
+    expect(parsed.unknownPaths).not.toContain('model.nodes[2].process.flows[0].id')
+    const canvas = toCanvas(parsed.model)
+    expect(fromCanvas(canvas.nodes, canvas.edges, parsed.model).nodes.find(node => node.id === 'minister')?.process).toEqual(nested.nodes[2]?.process)
+    expect(validateWorkflowModel(parsed.model)).toContainEqual(expect.objectContaining({ code: 'subprocess-flow-self-link', nodeId: 'minister' }))
+  })
+
+  it('accepts backend business JSON with omitted processName/flows and fills designer-only defaults', () => {
+    const backendInput = { processId: 'compact', nodes: [{ id: 'approve', type: 'approval' }] }
+    const parsed = parseWorkflowInput(backendInput)
+    expect(parsed.model).toMatchObject({ processId: 'compact', processName: 'compact', nodes: [{ id: 'approve', name: '', x: 300, y: 80 }], flows: [] })
+    expect(parsed.unknownPaths).toEqual([])
   })
 
   it('recognizes and round-trips service countersign properties as business fields', () => {

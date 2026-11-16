@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: true,
-      port: 5173,
+      port: 5171,
       proxy: {
         "/api/camunda": {
           target: env.CAMUNDA_PROXY_TARGET,

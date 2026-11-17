@@ -5,10 +5,43 @@ import { createNodeRecord, fromCanvas, toCanvas } from '../src/adapter'
 import { validateWorkflowModel } from '../src/validation'
 import type { WorkflowModel } from '../src/types'
 import { WORKFLOW_NODE_TYPES } from '../src/contract'
+import { toWorkflowModelInput, toWorkflowCompilerJson } from '../src/compiler-model'
 
 const model = fixture as WorkflowModel
 
 describe('WorkflowModel v1 public contract', () => {
+  it('keeps SDK-supported parallel nodes intact but blocks the unsupported canvas capability', () => {
+    const input = { ...model, nodes: model.nodes.map(node => node.id === 'gwMinister' ? { ...node, type: 'parallel' } : node) } as WorkflowModel
+    const before = structuredClone(input)
+    const parsed = parseWorkflowInput(input)
+    expect(parsed.model).toEqual(before)
+    expect(parsed.unknownPaths.some(path => path.includes('type:parallel'))).toBe(true)
+    expect(workflowIssues(parsed.model)).toContainEqual(expect.objectContaining({ code: 'unknown-node', nodeId: 'gwMinister' }))
+    expect(input).toEqual(before)
+  })
+
+  it('strips only editor metadata recursively and keeps nested diagnostics on the outer container', () => {
+    const input = { ...model, width: 900, nodes: model.nodes.map(node => node.id === 'apply' ? { ...node, type: 'subProcess', subProcessKey: 'library', process: { width: 400, nodes: [{ id: 'review', type: 'approval', width: 120, allowTransfer: false }], flows: [] } } : node) } as WorkflowModel
+    const exported = toWorkflowCompilerJson(input)
+    expect(exported).not.toHaveProperty('width')
+    expect(exported.nodes[1]).not.toHaveProperty('subProcessKey')
+    expect(exported.nodes[1]!.process).toEqual({ nodes: [{ id: 'review', type: 'approval', width: 120, allowTransfer: false }], flows: [] })
+    input.nodes[1]!.process!.nodes[0]!.futurePolicy = { retain: true }
+    expect(() => toWorkflowCompilerJson(input)).toThrow()
+    expect(workflowIssues(input)).toContainEqual(expect.objectContaining({ code: 'unknown-field', nodeId: 'apply', scope: ['apply'], path: '/nodes/1/process/nodes/0/futurePolicy' }))
+    expect(input.nodes[1]!.process!.nodes[0]!.futurePolicy).toEqual({ retain: true })
+  })
+
+  it('handles cyclic and malformed nested input without hanging or dropping it', () => {
+    const cyclic = structuredClone(model)
+    cyclic.nodes[1] = { ...cyclic.nodes[1]!, type: 'subProcess', process: cyclic }
+    expect(() => toWorkflowCompilerJson(cyclic)).toThrow()
+    const input = { ...model, nodes: model.nodes.map(node => node.id === 'apply' ? { ...node, type: 'subProcess', process: { nodes: [null], flows: [null] } } : node) } as unknown as WorkflowModel
+    expect(parseWorkflowInput(input).model.nodes[1]!.process!.nodes).toEqual([null])
+    expect(workflowIssues(input)).toContainEqual(expect.objectContaining({ code: 'field-type', path: '/nodes/1/process/nodes/0' }))
+    expect(toWorkflowModelInput(input)).toMatchObject({ nodes: expect.any(Array) })
+  })
+
   it('derives known runtime node types from the exhaustive built-in definitions', () => {
     expect(WORKFLOW_NODE_TYPES).toEqual(['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'subProcess', 'end'])
   })
@@ -97,6 +130,7 @@ describe('WorkflowModel v1 public contract', () => {
         : node.id === 'gwMinister'
           ? { ...node, type: 'timer', timerType: 'duration', timerValue: 'PT30M' }
           : node),
+      flows: model.flows.map(flow => flow.source === 'gwMinister' ? { ...flow, conditionExpression: flow.branch === 'reject' ? 'false' : 'true' } : flow),
     } as WorkflowModel
     const parsed = parseWorkflowInput(eventModel)
     const canvas = toCanvas(parsed.model)
@@ -109,7 +143,7 @@ describe('WorkflowModel v1 public contract', () => {
   it('validates timer values by the selected condition and allows runtime values to stay empty', () => {
     const timer = { ...model, nodes: model.nodes.map(node => node.id === 'minister'
       ? { ...node, type: 'timer', timerType: 'duration', timerValue: '' }
-      : node) } as WorkflowModel
+      : node), flows: model.flows.map(flow => flow.source === 'gwMinister' ? { ...flow, conditionExpression: flow.branch === 'reject' ? 'false' : 'true' } : flow) } as WorkflowModel
     expect(validateWorkflowModel(timer)).toEqual([])
     const date = { ...timer, nodes: timer.nodes.map(node => node.id === 'minister' ? { ...node, timerType: 'date', timerValue: '2026-12-31T23:59:59' } : node) }
     expect(validateWorkflowModel(date)).toEqual([])

@@ -10,7 +10,10 @@ const source = readFileSync(new URL('../src/components/common/DataTable/cellValu
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText
-const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(compiled).toString('base64')
+const typesSource = readFileSync(new URL('../src/components/common/DataTable/types.ts', import.meta.url), 'utf8')
+const typesCode = ts.transpileModule(typesSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+const typesUrl = 'data:text/javascript;base64,' + Buffer.from(typesCode).toString('base64')
+const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(compiled.replace(/from ['"]\.\/types['"]/, 'from ' + JSON.stringify(typesUrl))).toString('base64')
 const { displayCellValue, formatTableValue, isEmptyCellValue, resolveTableOption } = await import(moduleUrl)
 
 test('missing cell values use the configured marker without hiding zero or false', () => {

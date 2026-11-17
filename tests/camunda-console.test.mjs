@@ -42,12 +42,12 @@ async function mountConsole(overrides = {}) {
   const { descriptor } = parse(source('src/views/CamundaConsoleView.vue'))
   let code = compileScript(descriptor, { id: 'console-test-' + id }).content
   code = code.replace(/from ['"]vue['"]/g, 'from ' + JSON.stringify(vueFacade))
-  code = code.replace(/import\s*\{([^}]+)\}\s*from ['"]element-plus['"]/, (_, names) => names.split(',').map(n => n.trim()).map(n => {
+  code = code.replace(/import\s*\{([^}]+)\}\s*from ['"]element-plus['"]/, (_, names) => names.split(',').map(n => n.trim()).filter(Boolean).map(n => {
     if (n === 'ElMessage') return 'const ElMessage = { success: value => globalThis.__camundaConsoleFixtures.get(' + id + ').messages.push(value) };'
     if (n === 'ElMessageBox') return 'const ElMessageBox = { confirm: async () => {}, prompt: async () => ({ value: "3" }) };'
     return 'const ' + n + ' = {};'
   }).join('\n'))
-  code = code.replace(/import\s*\{([^}]+)\}\s*from ['"]@element-plus\/icons-vue['"]/, (_, names) => names.split(',').map(n => 'const ' + n.trim() + ' = {};').join('\n'))
+  code = code.replace(/import\s*\{([^}]+)\}\s*from ['"]@element-plus\/icons-vue['"]/, (_, names) => names.split(',').map(n => n.trim()).filter(Boolean).map(n => 'const ' + n + ' = {};').join('\n'))
   code = code.replace(/import initialDiagram from [^\n]+/, 'const initialDiagram = "<xml/>";')
   code = code.replace(/import ReadOnlyProcessDiagram from [^\n]+/, 'const ReadOnlyProcessDiagram = {};')
   code = code.replace(/import DataTable, \{ type DataTableColumn \} from ['"]@\/components\/common\/DataTable['"]/, 'const DataTable = {};')

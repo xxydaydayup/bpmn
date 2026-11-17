@@ -42,6 +42,23 @@ vi.mock('@vue-flow/core', async () => {
 const validModel = fixture as WorkflowModel
 
 describe('public WorkflowDesigner behavior', () => {
+  it('binds a published fixed form version and preserves it through history and import without changing form', async () => {
+    const model = { ...validModel, nodes: validModel.nodes.map(node => node.id === 'apply' ? { ...node, form: 'legacy-form' } : node) }
+    const businessForms = { list: vi.fn().mockResolvedValue([{ key: 'leave', name: '请假单', version: 3, status: 'PUBLISHED' }]), get: vi.fn().mockResolvedValue({ key: 'leave', name: '请假单', version: 3, status: 'PUBLISHED' }) }
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: model, extensions: { businessForms } } })
+    await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
+    await vi.waitFor(() => expect(wrapper.find('.business-form-editor select option[value="form:leave@3"]').exists()).toBe(true))
+    await wrapper.get('.business-form-editor select').setValue('form:leave@3')
+    const exported = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign()
+    expect(exported().model.nodes.find(node => node.id === 'apply')).toMatchObject({ bizFormKey: 'form:leave@3', form: 'legacy-form' })
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(exported().model.nodes.find(node => node.id === 'apply')?.bizFormKey).toBeUndefined()
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    const copy = mount(WorkflowDesigner, { props: { modelValue: JSON.parse(JSON.stringify(exported())) } })
+    expect((copy.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'apply')).toMatchObject({ bizFormKey: 'form:leave@3', form: 'legacy-form' })
+    copy.unmount(); wrapper.unmount()
+  })
+
   it('shows and creates all built-in nodes using registered defaults', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
     const titles = wrapper.findAll('.wfd-library-item strong').map(item => item.text())
@@ -100,14 +117,15 @@ describe('public WorkflowDesigner behavior', () => {
     const model = {
       ...validModel,
       nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, type: 'subProcess', name: '预算审批' } : node),
+      flows: validModel.flows.map(flow => flow.source === 'gwMinister' ? { ...flow, conditionExpression: flow.branch === 'reject' ? '${false}' : '${true}' } : flow),
     } as WorkflowModel
     const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: model, compile, extensions: { subprocessFragments } } })
     await wrapper.findAll('.vue-flow__node')[model.nodes.findIndex(node => node.id === 'minister')]!.trigger('click')
     await vi.waitFor(() => expect(subprocessFragments.list).toHaveBeenCalled())
-    const selector = wrapper.findAll('select').find(item => item.element.options.length > 1)!
+    const selector = wrapper.get('.wfd-subprocess-select-field select')
     await selector.setValue('fragment-budget')
-    await wrapper.findAll('button').find(button => button.text().includes('嵌入此片段'))!.trigger('click')
+
     await vi.waitFor(() => expect(subprocessFragments.get).toHaveBeenCalledWith('fragment-budget'))
     const getNode = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')!
     await vi.waitFor(() => expect(getNode().subProcessKey).toBe('fragment-budget'))
@@ -132,8 +150,8 @@ describe('public WorkflowDesigner behavior', () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: model, extensions: { subprocessFragments } } })
     await wrapper.findAll('.vue-flow__node')[model.nodes.findIndex(node => node.id === 'minister')]!.trigger('click')
     await vi.waitFor(() => expect(subprocessFragments.list).toHaveBeenCalled())
-    await wrapper.findAll('select').find(item => item.element.options.length > 1)!.setValue('outer-key')
-    await wrapper.findAll('button').find(button => button.text().includes('嵌入此片段'))!.trigger('click')
+    await wrapper.get('.wfd-subprocess-select-field select').setValue('outer-key')
+
     const embedded = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')!
     await vi.waitFor(() => expect(embedded().subProcessKey).toBe('outer-key'))
     expect(embedded().process).toEqual({ processId: 'outer-fragment', processName: '外层', nodes: nested.nodes, flows: [] })
@@ -198,9 +216,9 @@ describe('public WorkflowDesigner behavior', () => {
         : node),
     } as WorkflowModel
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: invalid } })
-    expect(wrapper.text()).toContain('定时时间格式不符合ISO-8601 时长')
+    expect(wrapper.text()).toContain('定时时长必须使用 ISO-8601 格式')
     await wrapper.findAll('.vue-flow__node').find(node => node.text().includes('部长审批结果'))!.trigger('click')
-    expect(wrapper.text()).toContain('定时时间格式不符合ISO-8601 时长')
+    expect(wrapper.text()).toContain('定时时长必须使用 ISO-8601 格式')
   })
 
   it('creates node ids that can be used as Camunda EL variable names', () => {
@@ -244,6 +262,7 @@ describe('public WorkflowDesigner behavior', () => {
       nodes: validModel.nodes.map(node => node.id === 'gwManagers'
         ? { ...node, type: 'timer', timerType: 'duration', timerValue: 'PT1M' }
         : node),
+      flows: validModel.flows.map(flow => flow.source === 'gwManagers' ? { ...flow, conditionExpression: flow.branch === 'reject' ? '${false}' : '${true}' } : flow),
     } as WorkflowModel
     const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: timerModel, compile } })
@@ -514,7 +533,7 @@ describe('public WorkflowDesigner behavior', () => {
     expect(model.flows.some(item => item.source === 'apply' || item.target === 'apply')).toBe(false)
     await wrapper.find('button[aria-label="撤销"]').trigger('click')
     model = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
-    expect(model.nodes.find(node => node.id === 'apply')).toMatchObject({ name: '立项审批单', x: 180, y: 145 })
+    expect(model.nodes.find(node => node.id === 'apply')).toMatchObject(validModel.nodes.find(node => node.id === 'apply')!)
     expect(model.flows.filter(item => item.source === 'apply' || item.target === 'apply')).toHaveLength(4)
   })
 
@@ -744,7 +763,7 @@ describe('public WorkflowDesigner behavior', () => {
     await wrapper.vm.$nextTick()
     expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(false)
     await wrapper.find('button[aria-label="撤销"]').trigger('click')
-    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')).toMatchObject({ x: 340, y: 145 })
+    expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')).toMatchObject(validModel.nodes.find(node => node.id === 'minister')!)
   })
 
   it('restores route points with their flow when undoing and redoing a node drag', async () => {
@@ -760,7 +779,7 @@ describe('public WorkflowDesigner behavior', () => {
     await wrapper.vm.$nextTick()
     await wrapper.find('button[aria-label="撤销"]').trigger('click')
     let exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel; editor: { routes?: Record<string, unknown> } } }).exportDesign()
-    expect(exported.model.nodes.find(node => node.id === 'minister')).toMatchObject({ x: 340, y: 145 })
+    expect(exported.model.nodes.find(node => node.id === 'minister')).toMatchObject(validModel.nodes.find(node => node.id === 'minister')!)
     expect(exported.editor.routes?.['flow-1']).toEqual(route)
     await wrapper.find('button[aria-label="重做"]').trigger('click')
     exported = (wrapper.vm as unknown as { exportDesign: () => typeof exported }).exportDesign()
@@ -921,7 +940,7 @@ describe('public WorkflowDesigner behavior', () => {
     const reminderModel = { ...validModel, nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, reminder: { action: 'return' } } : node) } as WorkflowModel
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: reminderModel, compile: vi.fn() } })
     expect(wrapper.findAll('button').find(button => button.text().includes('生成 BPMN XML'))!.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('需要选择退回目标')
+    expect(wrapper.text()).toContain('超时退回需要同层目标')
   })
 
   it('preserves existing timeout reminder JSON fields when editing another reminder field', async () => {

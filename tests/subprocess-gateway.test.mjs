@@ -5,11 +5,17 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const ts = require('typescript')
+const boundarySource = readFileSync(new URL('../packages/workflow-designer/src/compiler-model.ts', import.meta.url), 'utf8')
+const boundaryCode = ts.transpileModule(boundarySource, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText.replace("'@workflow/sdk'", JSON.stringify(new URL('../packages/workflow-sdk/dist/index.js', import.meta.url).href))
+const boundaryUrl = 'data:text/javascript;base64,' + Buffer.from(boundaryCode).toString('base64')
 const source = readFileSync(new URL('../src/api/workflow/subProcessGateway.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText
 const code = compiled
+  .replace("'@workflow/designer'", JSON.stringify(boundaryUrl))
   .replace(/import \{ request \} from ['"]@\/utils\/request['"];?/, 'const request = async () => { throw new Error("Unexpected default request"); };')
   .replace(/import type [^;]+;?\n/g, '')
 const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(code).toString('base64')

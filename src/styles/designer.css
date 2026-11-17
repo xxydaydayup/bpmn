@@ -1,5 +1,6 @@
 /* Designer chrome. Canvas geometry, typography and semantic colors live in bpmn/theme.ts. */
 .designer-shell { height: 100dvh; min-height: 620px; overflow: hidden; }
+.subprocess-editor-shell { min-height: 0; }
 .designer-shell > .main-shell { min-height: 0; }
 .designer-shell .page-container { padding: 0; margin: 0; max-width: none; height: 100%; }
 .designer-shell .sidebar { padding-top: 7px; }
@@ -7,6 +8,10 @@
 .designer-shell .sidebar-menu.el-menu--collapse .el-menu-item { margin: 5px 10px; padding: 0 !important; width: 44px; height: 44px; border-radius: 8px; }
 .designer-shell .sidebar-menu.el-menu--collapse .el-menu-item .el-menu-tooltip__trigger { padding: 0 10px; }
 .designer-page { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--color-text-strong); background: white; }
+.subprocess-editor-shell .subprocess-page.is-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: 0; overflow: hidden; background: #fff; }
+.subprocess-editor-shell .subprocess-editor-header { flex: 0 0 60px; }
+.subprocess-editor-shell .subprocess-page.is-editor .subprocess-editor-body { flex: 1; min-height: 0; overflow: hidden; grid-template-rows: auto minmax(0, 1fr); }
+.subprocess-editor-shell .subprocess-page.is-editor .subprocess-editor-body > .wfd { flex: 1; height: 100%; max-height: none; min-height: 0; }
 .designer-page button:focus-visible { outline: 2px solid var(--diagram-accent); outline-offset: 3px; }
 .designer-page button:disabled { opacity: .38; cursor: default; }
 .designer-document-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex: 0 0 96px; padding: 16px 25px; border-bottom: 1px solid var(--color-border); }
@@ -140,7 +145,11 @@
 }
 @media (max-width: 760px) {
   .designer-shell, .app-shell.designer-shell.is-collapsed { grid-template-columns: minmax(0, 1fr); min-height: 560px; }
+  .subprocess-editor-shell { min-height: 0; }
   .designer-shell .sidebar { display: none; }
+  .subprocess-editor-shell .subprocess-editor-header { flex-basis: 55px; }
+  .subprocess-editor-shell .subprocess-page.is-editor { min-height: 0; }
+  .subprocess-editor-shell .subprocess-page.is-editor .subprocess-editor-body { min-height: 0; padding: 8px; }
   .designer-document-header { flex-basis: 86px; padding: 14px; gap: 10px; }
   .designer-document-actions .designer-button > span:not(.diagram-icon) { display: none; }
   .designer-document-actions .designer-button { width: 31px; height: 33px; padding: 0; }

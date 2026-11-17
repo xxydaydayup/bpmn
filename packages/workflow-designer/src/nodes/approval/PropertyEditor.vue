@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import type { WorkflowNodePropertyEditorProps } from '../types'
 import ReminderEditor from '../shared/ReminderEditor.vue'
+import BusinessFormEditor from '../shared/BusinessFormEditor.vue'
 
 defineProps<WorkflowNodePropertyEditorProps>()
 </script>
 
 <template>
+  <BusinessFormEditor v-bind="$props" />
   <label class="wfd-field">
-    <span>表单引用</span>
+    <span>BPMN 表单引用（form）</span>
     <input
       :value="String(model.form ?? '')"
       :disabled="readonly"

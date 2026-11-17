@@ -13,6 +13,12 @@ const router = createRouter({
       redirect: workflowRuntime.businessEnabled ? '/workflow-business' : '/table',
       children: [
         {
+          path: 'forms',
+          name: 'forms',
+          component: () => import('@/views/FormManagementView.vue'),
+          meta: { title: '业务表单' },
+        },
+        {
           path: 'table',
           name: 'table',
           component: () => import('@/views/TableView.vue'),

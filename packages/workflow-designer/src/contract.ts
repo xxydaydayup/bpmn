@@ -1,12 +1,8 @@
 import type { WorkflowDesignDocument, WorkflowEditorState, WorkflowInput, WorkflowModel, WorkflowValidationIssue } from './types'
 import { getWorkflowNodeDefinition, isWorkflowNodeType } from './nodes'
+import { workflowProtocolIssues } from './protocol-validation'
 export { WORKFLOW_NODE_TYPES } from './nodes'
 
-const MODEL_KEYS = new Set(['processId', 'processName', 'nodes', 'flows', 'width', 'height', 'bizFormKey'])
-const EMBEDDED_PROCESS_KEYS = new Set(['processId', 'processName', 'nodes', 'flows'])
-const NODE_KEYS = new Set(['id', 'type', 'name', 'x', 'y', 'width', 'height', 'bizType', 'form', 'messageName', 'timerType', 'timerValue', 'sequential', 'reminder', 'serviceName', 'serviceUrl', 'countersign', 'approveMode', 'passRate', 'process', 'subProcessKey', 'subProcessName', 'statusVariable', 'allowTransfer', 'allowAddSigner', 'bizFormKey', 'assignee'])
-const FLOW_KEYS = new Set(['id', 'source', 'target', 'branch', 'conditionExpression'])
-const MODEL_DEPTH_LIMIT = 100
 
 export interface ParsedWorkflowInput {
   document: WorkflowDesignDocument | Record<string, unknown>
@@ -52,27 +48,26 @@ export function createDesignDocument(model: WorkflowModel, editor: WorkflowEdito
 }
 
 
-function findUnknownPaths(model: WorkflowModel, path = 'model', depth = 0, embedded = false): string[] {
-  const result: string[] = []
-  const allowedModelKeys = embedded ? EMBEDDED_PROCESS_KEYS : MODEL_KEYS
-  for (const key of Object.keys(model)) if (!allowedModelKeys.has(key)) result.push(`${path}.${key}`)
-  if (depth > MODEL_DEPTH_LIMIT) { result.push(`${path}.nodes (子流程嵌套超过安全检查上限)`); return result }
-  model.nodes.forEach((node, index) => {
-    const nodePath = `${path}.nodes[${index}]`
-    for (const key of Object.keys(node)) if (!NODE_KEYS.has(key)) result.push(`${nodePath}.${key}`)
-    if (!isWorkflowNodeType(node.type)) result.push(`${nodePath}.type:${node.type}`)
-    if (node.reminder && Object.keys(node.reminder).some(key => !['duration', 'action', 'target', 'terminate', 'name'].includes(key))) {
-      for (const key of Object.keys(node.reminder)) if (!['duration', 'action', 'target', 'terminate', 'name'].includes(key)) result.push(`${nodePath}.reminder.${key}`)
-    }
-    if (node.type === 'subProcess' && node.process && Array.isArray(node.process.nodes)) {
-      const process = { ...node.process, flows: Array.isArray(node.process.flows) ? node.process.flows : [] } as WorkflowModel
-      result.push(...findUnknownPaths(process, `${nodePath}.process`, depth + 1, true))
-    }
-  })
-  model.flows.forEach((flow, index) => {
-    const flowPath = `${path}.flows[${index}]`
-    for (const key of Object.keys(flow)) if (!FLOW_KEYS.has(key)) result.push(`${flowPath}.${key}`)
-  })
+function findUnknownPaths(model: WorkflowModel): string[] {
+  const result = workflowProtocolIssues(model)
+    .filter(issue => ['unknown-field', 'unknown-node'].includes(issue.code))
+    .map(issue => 'model' + (issue.path ?? '').split('/').slice(1).map(part => {
+      const value = part.replaceAll('~1', '/').replaceAll('~0', '~')
+      return /^[0-9]+$/.test(value) ? '[' + value + ']' : '.' + value
+    }).join(''))
+  const pending = [{ nodes: model.nodes, path: 'model' }]
+  const seen = new Set<object>()
+  while (pending.length) {
+    const current = pending.pop()!
+    if (seen.has(current.nodes)) continue
+    seen.add(current.nodes)
+    current.nodes.forEach((node, index) => {
+      if (!node || typeof node !== 'object') return
+      const path = `${current.path}.nodes[${index}]`
+      if (!isWorkflowNodeType(node.type) && !result.includes(path + '.type')) result.push(path + '.type:' + node.type)
+      if (node.type === 'subProcess' && node.process && Array.isArray(node.process.nodes)) pending.push({ nodes: node.process.nodes, path: path + '.process' })
+    })
+  }
   return result
 }
 
@@ -104,19 +99,15 @@ export function parseWorkflowInput(input: WorkflowInput): ParsedWorkflowInput {
 }
 
 export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIssue[] = []): WorkflowValidationIssue[] {
-  const issues: WorkflowValidationIssue[] = [...extra]
-  const ids = new Set<string>()
+  const issues: WorkflowValidationIssue[] = [...workflowProtocolIssues(model), ...extra]
   const byId = new Map(model.nodes.map(node => [node.id, node]))
   if (!model.processName.trim()) issues.push({ code: 'process-name', message: '请填写流程名称。' })
   if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(model.processId)) issues.push({ code: 'process-id', message: '流程标识必须以英文字母开头，只能包含英文字母、数字、下划线和连字符。' })
   if (model.nodes.filter(node => node.type === 'start').length !== 1) issues.push({ code: 'start-count', message: '流程需要且只能有一个开始节点。' })
   if (model.nodes.filter(node => node.type === 'end').length !== 1) issues.push({ code: 'end-count', message: '流程需要且只能有一个结束节点。' })
   for (const node of model.nodes) {
-    if (!node.id.trim() || ids.has(node.id)) issues.push({ code: 'node-id', message: `节点标识为空或重复：${node.id}`, nodeId: node.id })
-    ids.add(node.id)
     if (!node.name.trim()) issues.push({ code: 'node-name', message: '请填写节点名称。', nodeId: node.id })
-    if (!isWorkflowNodeType(node.type)) issues.push({ code: 'unknown-node', message: `暂不支持“${node.type}”节点，保留原始数据但不能编译。`, nodeId: node.id })
-    else issues.push(...(getWorkflowNodeDefinition(node.type)?.checkValid?.(node) ?? []))
+    if (!isWorkflowNodeType(node.type) && !issues.some(issue => issue.code === 'unknown-node' && issue.nodeId === node.id)) issues.push({ code: 'unknown-node', message: `画布暂不支持“${node.type}”节点，保留原始数据但不能编译。`, nodeId: node.id })
   }
   const ordinary = new Map<string, string[]>()
   const outgoing = new Map<string, string[]>()
@@ -125,7 +116,7 @@ export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIs
     const edgeId = `flow-${index}`
     const source = byId.get(flow.source)
     const target = byId.get(flow.target)
-    if (!source || !target) { issues.push({ code: 'flow-reference', message: '连线引用了不存在的节点。', edgeId }); continue }
+    if (!source || !target) continue
     if (flow.source === flow.target) issues.push({ code: 'self-link', message: '节点不能连接到自身。', edgeId })
     const pair = `${flow.source}→${flow.target}`
     if (pairs.has(pair)) issues.push({ code: 'duplicate-flow', message: '同一对节点之间存在重复连线。', edgeId })
@@ -148,5 +139,27 @@ export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIs
     visiting.delete(id); visited.add(id); return false
   }
   if (model.nodes.some(node => hasCycle(node.id))) issues.push({ code: 'cycle', message: '普通流转路径不能形成循环；驳回回流请标记为 reject 分支。' })
+  // Product rules remain in the editor; protocol semantics belong to the SDK.
+  issues.push(...workflowEditorNodeIssues(model))
+  return issues
+}
+
+export function workflowEditorNodeIssues(model: WorkflowModel): WorkflowValidationIssue[] {
+  const issues: WorkflowValidationIssue[] = []
+  const pending = [{ nodes: model.nodes, flows: model.flows, owner: undefined as string | undefined }]
+  const seen = new Set<object>()
+  while (pending.length) {
+    const current = pending.pop()!
+    if (seen.has(current.nodes)) continue
+    seen.add(current.nodes)
+    for (const node of current.nodes) {
+      if (!node || typeof node !== 'object') continue
+      issues.push(...(getWorkflowNodeDefinition(node.type)?.checkValid?.(node) ?? []).map(issue => ({ ...issue, nodeId: current.owner ?? issue.nodeId })))
+      if (node.type === 'condition' && current.flows.filter(flow => flow?.source === node.id).length < 2) issues.push({ code: 'condition-branches', message: '条件分支至少需要两条候选路径。', nodeId: current.owner ?? node.id })
+      if (current.owner && !isWorkflowNodeType(node.type)) issues.push({ code: 'unknown-node', message: '子流程包含当前画布不支持的节点。', nodeId: current.owner })
+      if (node.type === 'subProcess' && node.process && Array.isArray(node.process.nodes)) pending.push({ nodes: node.process.nodes, flows: Array.isArray(node.process.flows) ? node.process.flows : [], owner: current.owner ?? node.id })
+    }
+    if (current.owner) for (const flow of current.flows) if (flow && flow.source === flow.target) issues.push({ code: 'subprocess-flow-self-link', message: '子流程节点不能连接自身。', nodeId: current.owner })
+  }
   return issues
 }

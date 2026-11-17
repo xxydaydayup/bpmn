@@ -1,9 +1,10 @@
 import type { Component, CSSProperties } from 'vue'
 import type { WorkflowNodeType } from './nodes/node-types'
+import type { WorkflowNode as StandardNode, WorkflowFlow as StandardFlow, WorkflowModel as StandardModel, WorkflowSubProcessModel as StandardProcess } from '@workflow/sdk'
 
 export type { WorkflowNodeType } from './nodes/node-types'
 export type WorkflowBranch = string
-export type WorkflowNodeRecord = Record<string, unknown> & {
+export type WorkflowNodeRecord = Omit<StandardNode, 'type' | 'name' | 'x' | 'y' | 'process' | 'reminder' | 'approveMode'> & Record<string, unknown> & {
   id: string
   type: string
   name: string
@@ -32,14 +33,14 @@ export type WorkflowNodeRecord = Record<string, unknown> & {
   width?: number
   height?: number
 }
-export type WorkflowFlowRecord = Record<string, unknown> & {
+export type WorkflowFlowRecord = StandardFlow & Record<string, unknown> & {
   id?: string
   source: string
   target: string
   branch?: WorkflowBranch
   conditionExpression?: string
 }
-export interface WorkflowModel extends Record<string, unknown> {
+export interface WorkflowModel extends Omit<StandardModel, 'nodes' | 'flows'>, Record<string, unknown> {
   processId: string
   processName: string
   nodes: WorkflowNodeRecord[]
@@ -48,7 +49,7 @@ export interface WorkflowModel extends Record<string, unknown> {
   height?: number
   bizFormKey?: string
 }
-export interface WorkflowSubProcessModel extends Record<string, unknown> {
+export interface WorkflowSubProcessModel extends Omit<StandardProcess, 'nodes' | 'flows'>, Record<string, unknown> {
   nodes: WorkflowNodeRecord[]
   processId?: string
   processName?: string
@@ -93,8 +94,16 @@ export interface WorkflowValidationIssue {
   nodeId?: string
   edgeId?: string
   locationLabel?: string
+  severity?: 'error' | 'warning'
+  path?: string
+  scope?: string[]
 }
 export type WorkflowCompile = (model: WorkflowModel) => Promise<unknown>
+export interface WorkflowFormOption { key: string; name: string; version: number; status: string }
+export interface WorkflowFormDataSource {
+  list: (query: { nameLike?: string; firstResult: number; maxResults: number }) => Promise<WorkflowFormOption[]>
+  get: (key: string) => Promise<WorkflowFormOption>
+}
 export type WorkflowDeploy = (model: WorkflowModel) => Promise<unknown>
 export type WorkflowVerifyDeployment = (model: WorkflowModel) => Promise<unknown | undefined>
 export interface WorkflowDesignerExtensions {
@@ -106,6 +115,7 @@ export interface WorkflowDesignerExtensions {
   validate?: (model: WorkflowModel) => WorkflowValidationIssue[]
   theme?: WorkflowTheme
   subprocessFragments?: WorkflowSubProcessDataSource
+  businessForms?: WorkflowFormDataSource
 }
 export interface WorkflowDesignerProps {
   modelValue?: WorkflowInput

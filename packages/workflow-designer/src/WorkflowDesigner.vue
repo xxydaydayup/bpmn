@@ -2,10 +2,11 @@
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { VueFlow, useVueFlow, type Connection, type NodeMouseEvent, type EdgeMouseEvent } from '@vue-flow/core'
 import { IconArrowBackUp, IconArrowForwardUp, IconChecklist, IconCloudUpload, IconCode, IconDownload, IconFileImport, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLayoutSidebarRightCollapse, IconLayoutSidebarRightExpand, IconPlus, IconTemplate, IconWand } from '@tabler/icons-vue'
-import { createDesignDocument, isWorkflowModel, parseWorkflowInput } from './contract'
+import { createDesignDocument, isWorkflowModel, parseWorkflowInput, workflowEditorNodeIssues } from './contract'
 import { templateIcons } from './icons'
 import { cloneWorkflowModelWithFreshNodeIds, createNodeRecord, createWorkflowNodeId, fromCanvas, normalizeLegacyUuidNodeIds, toCanvas, type DesignerEdge, type DesignerNode } from './adapter'
 import { canConnectNodes, validateWorkflowModel } from './validation'
+import { workflowProtocolIssues } from './protocol-validation'
 import { layoutWorkflow, refreshFeedbackRoutes } from './layout'
 import WorkflowNode from './nodes/WorkflowNode.vue'
 import WorkflowEdge from './edges/WorkflowEdge.vue'
@@ -94,7 +95,7 @@ const reminderTargetNodes = computed(() => model.value.nodes.filter(node => {
 const readonlyMode = computed(() => props.readonly || originalReadonly.value)
 const model = computed(() => fromCanvas(nodes.value, edges.value, baseModel()))
 const allIssues = computed<WorkflowValidationIssue[]>(() => [...issues.value, ...unknownPaths.value.map(path => ({ code: 'unknown-business-data', message: '发现未识别的业务数据（' + path + '），保留原文但禁止编译。' }))])
-const canCompile = computed(() => Boolean(props.compile) && !readonlyMode.value && allIssues.value.length === 0 && compileState.value !== 'loading')
+const canCompile = computed(() => Boolean(props.compile) && !readonlyMode.value && !allIssues.value.some(issue => issue.severity !== 'warning') && compileState.value !== 'loading')
 const canDeploy = computed(() => Boolean(props.deploy) && canCompile.value && deployState.value !== 'loading')
 const deploySummary = computed(() => {
   const value = deployResult.value && typeof deployResult.value === 'object' ? deployResult.value as Record<string, unknown> : {}
@@ -467,7 +468,7 @@ function importJsonToCanvas() {
 async function compileModel(candidate: WorkflowModel = model.value, openXml = true) {
   const isCurrent = JSON.stringify(candidate) === JSON.stringify(model.value)
   const candidateIssues = validateForMode(candidate)
-  if (props.mode === 'subprocess-fragment' || !props.compile || (isCurrent && !canCompile.value) || candidateIssues.length || parseWorkflowInput(candidate).unknownPaths.length) {
+  if (props.mode === 'subprocess-fragment' || !props.compile || (isCurrent && !canCompile.value) || candidateIssues.some(issue => issue.severity !== 'warning') || parseWorkflowInput(candidate).unknownPaths.length) {
     issues.value = candidateIssues
     checkOpen.value = true
     return undefined
@@ -508,29 +509,18 @@ function runCheck() {
   checkOpen.value = true
 }
 function validateFragmentModel(value: WorkflowModel): WorkflowValidationIssue[] {
-  const result: WorkflowValidationIssue[] = []
+  const result: WorkflowValidationIssue[] = [...workflowProtocolIssues(value), ...workflowEditorNodeIssues(value)]
   if (value.nodes.length === 0) result.push({ code: 'fragment-empty', message: '片段至少需要一个节点。' })
-  const ids = new Set<string>()
   for (const node of value.nodes) {
-    if (!node.id.trim() || ids.has(node.id)) result.push({ code: 'fragment-node-id', message: `节点标识为空或重复：${node.id}`, nodeId: node.id })
-    ids.add(node.id)
     if (!node.name.trim()) result.push({ code: 'fragment-node-name', message: '请填写节点名称。', nodeId: node.id })
     if (!['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'].includes(node.type)) result.push({ code: 'fragment-node-type', message: `子流程片段不支持“${node.type}”节点。`, nodeId: node.id })
-    else result.push(...(getWorkflowNodeDefinition(node.type)?.checkValid?.(node) ?? []).map(issue => node.type === 'subProcess'
-      ? { ...issue, nodeId: node.id, locationLabel: [node.name, issue.locationLabel].filter(Boolean).join(' › ') }
-      : issue))
   }
   for (const [index, flow] of value.flows.entries()) {
-    if (!ids.has(flow.source) || !ids.has(flow.target)) result.push({ code: 'fragment-flow-reference', message: '连线引用了片段内不存在的节点。', edgeId: `flow-${index}` })
     if (flow.source === flow.target) result.push({ code: 'fragment-self-link', message: '节点不能连接到自身。', edgeId: `flow-${index}` })
   }
   for (const node of value.nodes) {
     if (node.type === 'start' && value.flows.some(flow => flow.target === node.id)) result.push({ code: 'fragment-start-incoming', message: '片段开始节点不能有上游连线。', nodeId: node.id })
     if (node.type === 'end' && value.flows.some(flow => flow.source === node.id)) result.push({ code: 'fragment-end-outgoing', message: '片段结束节点不能有后续连线。', nodeId: node.id })
-  }
-  for (const node of value.nodes.filter(item => item.type === 'condition')) {
-    const next = value.flows.filter(flow => flow.source === node.id)
-    if (next.length < 2) result.push({ code: 'fragment-condition-branches', message: `“${node.name}”至少需要两条候选路径。`, nodeId: node.id })
   }
   return result.map(issue => ({ ...issue, ...(issue.locationLabel ? {} : issue.nodeId ? { locationLabel: value.nodes.find(node => node.id === issue.nodeId)?.name ?? issue.nodeId } : {}) }))
 }
@@ -646,7 +636,7 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument, validate: (
             <label class="wfd-field"><span>节点名称</span><input :value="selectedNode.data.name" :disabled="readonlyMode" @focus="pushHistory" @change="commitTextInput($event, value => updateNode(selectedNode!.id, 'name', value))"></label>
             <label class="wfd-field"><span>节点标识</span><input :value="selectedNode.id" disabled></label>
             <label v-if="props.mode !== 'subprocess-fragment'" class="wfd-field"><span>业务标识（bizType）</span><input :value="String(getRecord(selectedNode.id)?.bizType ?? '')" :disabled="readonlyMode" placeholder="可选，供宿主业务系统识别" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'bizType', ($event.target as HTMLInputElement).value)"></label>
-          <component v-if="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :is="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :model="getRecord(selectedNode.id)" :readonly="readonlyMode" :reminder-targets="reminderTargetNodes" :subprocess-fragments="props.extensions?.subprocessFragments" :begin-edit="pushHistory" :update="(key: string, value: unknown) => updateNode(selectedNode!.id, key, value)" />
+          <component v-if="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :is="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :model="getRecord(selectedNode.id)" :readonly="readonlyMode" :reminder-targets="reminderTargetNodes" :subprocess-fragments="props.extensions?.subprocessFragments" :business-forms="props.extensions?.businessForms" :begin-edit="pushHistory" :update="(key: string, value: unknown) => updateNode(selectedNode!.id, key, value)" />
           </template><p v-else class="wfd-readonly-note">此版本无法编辑该节点。原始节点数据将在导出中保留，且不能编译。</p>
           <p class="wfd-coordinate">画布位置 <code>{{ Math.round(selectedNode.position.x) }}, {{ Math.round(selectedNode.position.y) }}</code></p>
         </template>

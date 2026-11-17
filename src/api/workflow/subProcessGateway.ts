@@ -1,6 +1,7 @@
 import type { AxiosRequestConfig } from 'axios'
 import { request } from '@/utils/request'
-import type { WorkflowModel, WorkflowNodeRecord, WorkflowSubProcessDataSource, WorkflowSubProcessDisplayJson, WorkflowSubProcessFragment, WorkflowSubProcessModel, WorkflowSubProcessQuery } from '@workflow/designer/types'
+import type { WorkflowModel, WorkflowSubProcessDataSource, WorkflowSubProcessDisplayJson, WorkflowSubProcessFragment, WorkflowSubProcessModel, WorkflowSubProcessQuery } from '@workflow/designer/types'
+import { toWorkflowCompilerJson } from '@workflow/designer'
 
 interface ApiResponse<T> { code: string; data?: T | null; message?: string }
 type Requester = <T>(config: AxiosRequestConfig) => Promise<T>
@@ -47,21 +48,8 @@ function displayJson(value: WorkflowSubProcessDisplayJson): WorkflowSubProcessDi
   return JSON.parse(JSON.stringify(value)) as WorkflowSubProcessDisplayJson
 }
 
-type CompilerProcess = Pick<WorkflowModel, 'nodes'> & Partial<Pick<WorkflowModel, 'processId' | 'processName' | 'flows'>>
 export function toBpmnCompilerJson(model: WorkflowModel): Record<string, unknown> {
-  const toProcess = (process: CompilerProcess): Record<string, unknown> => ({
-    ...(process.processId !== undefined ? { processId: process.processId } : {}),
-    ...(process.processName !== undefined ? { processName: process.processName } : {}),
-    nodes: process.nodes.map((node: WorkflowNodeRecord) => {
-      const { subProcessKey: _subProcessKey, subProcessName: _subProcessName, ...compilerNode } = node
-      return node.type === 'subProcess' && node.process
-        ? { ...compilerNode, process: toProcess(node.process) }
-        : compilerNode
-    }),
-    ...(process.flows !== undefined ? { flows: process.flows } : {}),
-  })
-  const result = toProcess(model)
-  return { ...result, ...(model.bizFormKey !== undefined ? { bizFormKey: model.bizFormKey } : {}) }
+  return { ...toWorkflowCompilerJson(model) }
 }
 
 async function sendSubProcessRequest<T>(send: Requester, config: AxiosRequestConfig, fallback: string, responseMode: 'data' | 'success' = 'data'): Promise<T> {

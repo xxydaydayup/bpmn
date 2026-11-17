@@ -2,13 +2,13 @@
   "processId": "project-approval",
   "processName": "立项审批",
   "nodes": [
-    { "id": "start", "type": "start", "name": "发起", "x": 100, "y": 165 },
-    { "id": "apply", "type": "approval", "name": "立项审批单", "x": 180, "y": 145 },
-    { "id": "minister", "type": "approval", "name": "部长审批", "x": 340, "y": 145 },
-    { "id": "gwMinister", "type": "condition", "name": "部长审批结果", "x": 500, "y": 160 },
-    { "id": "managers", "type": "countersign", "name": "各部门经理会签", "approveMode": "ALL", "x": 600, "y": 145 },
-    { "id": "gwManagers", "type": "condition", "name": "会签结果", "x": 760, "y": 160 },
-    { "id": "end", "type": "end", "name": "结束", "x": 860, "y": 165 }
+    { "id": "start", "type": "start", "name": "发起", "x": 12, "y": 13 },
+    { "id": "apply", "type": "approval", "name": "立项审批单", "x": 12, "y": 119 },
+    { "id": "minister", "type": "approval", "name": "部长审批", "x": 12, "y": 225 },
+    { "id": "gwMinister", "type": "condition", "name": "部长审批结果", "x": 12, "y": 331 },
+    { "id": "managers", "type": "countersign", "name": "各部门经理会签", "approveMode": "ALL", "x": 12, "y": 437 },
+    { "id": "gwManagers", "type": "condition", "name": "会签结果", "x": 12, "y": 543 },
+    { "id": "end", "type": "end", "name": "结束", "x": 12, "y": 649 }
   ],
   "flows": [
     { "source": "start", "target": "apply" },

@@ -1,57 +1,255 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/workflow-model-v1.schema.json",
-  "title": "WorkflowModel v1 (backend contract copy)",
-  "description": "Schema copy aligned with the backend business JSON specification at http://192.168.124.202:8085/bpmn/spec on 2026-11-10. The backend specification remains authoritative.",
+  "$id": "urn:workflow:sdk:workflow-model:v1",
+  "title": "Business Workflow Model v1",
+  "description": "SDK compatibility copy of backend /bpmn/spec version 1. Semantic checks and backend validation are also required. Unknown fields are rejected to protect data.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["processId", "nodes"],
+  "required": [
+    "processId",
+    "nodes"
+  ],
   "properties": {
-    "processId": { "type": "string", "minLength": 1 },
-    "processName": { "type": "string", "minLength": 1 },
-    "bizFormKey": { "type": "string" },
-    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "flows": { "type": "array", "items": { "$ref": "#/$defs/flow" } },
-    "width": { "type": "number" },
-    "height": { "type": "number" }
+    "processId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "processName": {
+      "type": "string"
+    },
+    "bizFormKey": {
+      "type": "string"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "flows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/flow"
+      }
+    }
   },
   "$defs": {
-    "node": {
-      "type": "object", "additionalProperties": false,
-      "required": ["id", "type"],
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["start", "approval", "countersign", "service", "receive", "timer", "condition", "subProcess", "end"] },
-        "name": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" },
-        "width": { "type": "number" }, "height": { "type": "number" },
-        "bizType": { "type": "string", "description": "可选的节点级业务标识，由宿主业务系统解释。" },
-        "form": { "type": "string" }, "messageName": { "type": "string" },
-        "timerType": { "enum": ["duration", "date", "cycle"] }, "timerValue": { "type": "string" },
-        "sequential": { "type": "boolean" },
-        "reminder": { "type": "object", "additionalProperties": false, "properties": { "duration": { "type": "string", "description": "ISO-8601 超时时长；留空时后端按 P1D 兜底。" }, "action": { "enum": ["notify", "return", "end"] }, "target": { "type": "string", "description": "仅 action=return：退回到同一层的活动节点。" }, "terminate": { "type": "boolean" }, "name": { "type": "string" } } },
-        "statusVariable": { "type": "string" }, "allowTransfer": { "type": "boolean" }, "allowAddSigner": { "type": "boolean" },
-        "bizFormKey": { "type": "string" }, "assignee": { "type": "string" },
-        "serviceName": { "type": "string" }, "serviceUrl": { "type": "string" },
-        "countersign": { "type": "boolean", "description": "启用服务节点的多实例调用与会签结果汇总。" },
-        "approveMode": { "type": "string", "description": "服务会签策略：ALL、ANY 或 VOTE；留空时由后端按默认/启动变量处理。" },
-        "sequential": { "type": "boolean", "description": "服务会签多实例是否按顺序执行；缺省为并行。" },
-        "passRate": { "type": "string", "description": "VOTE 策略的通过比例，范围为 (0, 1]。" },
-        "process": { "$ref": "#/$defs/process" },
-        "subProcessKey": { "type": "string", "description": "片段来源 key，仅用于设计器显示与显式刷新。" },
-        "subProcessName": { "type": "string", "description": "片段来源名称，仅用于设计器显示。" }
+        "processId": {
+          "type": "string"
+        },
+        "processName": {
+          "type": "string"
+        },
+        "bizFormKey": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "flows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flow"
+          }
+        }
       }
     },
-    "process": {
-      "type": "object", "required": ["nodes"], "additionalProperties": false,
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type"
+      ],
       "properties": {
-        "processId": { "type": "string" }, "processName": { "type": "string" },
-        "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
-        "flows": { "type": "array", "items": { "$ref": "#/$defs/flow" } }
-      }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "start",
+            "approval",
+            "countersign",
+            "condition",
+            "parallel",
+            "service",
+            "receive",
+            "timer",
+            "subProcess",
+            "end",
+            "startEvent",
+            "userTask",
+            "exclusiveGateway",
+            "parallelGateway",
+            "endEvent",
+            "receiveTask"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "bizType": {
+          "type": "string"
+        },
+        "form": {
+          "type": "string"
+        },
+        "bizFormKey": {
+          "type": "string"
+        },
+        "assignee": {
+          "type": "string"
+        },
+        "statusVariable": {
+          "type": "string"
+        },
+        "messageName": {
+          "type": "string"
+        },
+        "timerType": {
+          "enum": [
+            "duration",
+            "date",
+            "cycle"
+          ]
+        },
+        "timerValue": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "serviceUrl": {
+          "type": "string"
+        },
+        "countersign": {
+          "type": "boolean"
+        },
+        "approveMode": {
+          "enum": [
+            "ALL",
+            "ANY",
+            "VOTE"
+          ]
+        },
+        "passRate": {
+          "type": "string"
+        },
+        "sequential": {
+          "type": "boolean"
+        },
+        "allowTransfer": {
+          "type": "boolean"
+        },
+        "allowAddSigner": {
+          "type": "boolean"
+        },
+        "reminder": {
+          "$ref": "#/$defs/reminder"
+        },
+        "process": {
+          "$ref": "#/$defs/process"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "subProcess"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "process": {
+                "$ref": "#/$defs/process"
+              }
+            },
+            "required": [
+              "process"
+            ]
+          }
+        }
+      ]
     },
     "flow": {
-      "type": "object", "additionalProperties": false, "required": ["source", "target"],
-      "properties": { "id": { "type": "string" }, "source": { "type": "string" }, "target": { "type": "string" }, "branch": { "type": "string" }, "conditionExpression": { "type": "string" } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "branch": {
+          "type": "string"
+        },
+        "conditionExpression": {
+          "type": "string"
+        }
+      }
+    },
+    "reminder": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duration": {
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "notify",
+            "return",
+            "end"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
     }
   }
 }

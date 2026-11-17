@@ -10,6 +10,7 @@ import { createNodeRecord, createDesignDocument } from '@workflow/designer'
 import { subProcessLibraryGateway } from '@/api/workflow'
 import DataTable, { type DataTableColumn } from '@/components/common/DataTable'
 import { diagramCSSVariables } from '@/bpmn/theme'
+import '@/styles/designer.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,11 +42,7 @@ const columns = computed<DataTableColumn<WorkflowSubProcessFragment>[]>(() => [
   },
   {
     key: 'updatedAt', prop: 'updatedAt', label: '最近更新', minWidth: 175,
-    formatter: ({ value }) => {
-      if (typeof value !== 'string' || !value) return '—'
-      const date = new Date(value)
-      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
-    },
+    formatter: ({ value }) => displayUpdatedAt(value),
   },
   {
     key: 'actions', label: '操作', width: 148, align: 'center', fixed: 'right',
@@ -60,6 +57,12 @@ let listRequestGeneration = 0
 let searchTimer: number | undefined
 let lastSavedModel = ''
 let allowNavigationOnce = false
+
+function displayUpdatedAt(value: unknown) {
+  if (typeof value !== 'string' || !value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+}
 
 async function load(reset = true) {
   requestController?.abort()
@@ -215,20 +218,19 @@ onMounted(() => { if (isEditing.value) { editorName.value = fragmentName.value; 
   <section class="subprocess-page" :class="{ 'is-editor': isEditing }" :style="canvasStyle">
     <template v-if="isEditing">
       <header class="subprocess-editor-header">
-        <div><button class="subprocess-back" type="button" @click="leaveEditor">← 返回片段库</button><p class="subprocess-eyebrow">局部流程编辑</p><h1>{{ editorName || '新建子流程片段' }}</h1><p class="subprocess-explainer">片段保存为画布内容，可不包含开始和结束节点；保存后它不会单独部署。</p></div>
-        <div class="subprocess-editor-actions"><ElButton @click="leaveEditor">返回列表</ElButton><ElButton type="primary" :loading="saving" @click="save">保存片段</ElButton></div>
+        <div class="subprocess-editor-heading"><button class="subprocess-back" type="button" @click="leaveEditor">← 返回</button><h1>{{ editorName || '新建子流程片段' }}</h1></div>
+        <div class="subprocess-editor-actions"><ElButton type="primary" :loading="saving" @click="save">保存片段</ElButton></div>
       </header>
       <div v-if="loading" class="subprocess-editor-loading" role="status">正在读取片段内容…</div>
       <div v-else-if="error" class="subprocess-editor-error" role="alert">{{ error }}</div>
       <div v-else class="subprocess-editor-body">
-        <div class="subprocess-metadata"><label><span>片段名称</span><ElInput v-model="editorName" maxlength="80" show-word-limit placeholder="例如：部门审批步骤" /></label><label><span>片段描述</span><ElInput v-model="editorDescription" maxlength="240" placeholder="说明适用场景和入口、出口" /></label><code v-if="editingKey">{{ editingKey }}</code><span v-else class="subprocess-key-pending">key 由后端创建时生成</span></div>
+        <div class="subprocess-metadata"><label><span>片段名称</span><ElInput v-model="editorName" maxlength="80" show-word-limit placeholder="例如：部门审批步骤" /></label><label><span>片段描述</span><ElInput v-model="editorDescription" maxlength="240" placeholder="说明适用场景和入口、出口" /></label></div>
         <WorkflowDesigner v-if="design" ref="editorRef" v-model="design" mode="subprocess-fragment" :extensions="editorExtensions" />
       </div>
     </template>
     <template v-else>
-      <header class="subprocess-page-header"><div><p class="subprocess-eyebrow">WORKFLOW COMPONENTS</p><h1>子流程片段</h1><p>维护可复用的局部流程内容，在业务流程中嵌入时会复制当前画布快照。</p></div><ElButton type="primary" size="large" @click="createFragment">新建片段</ElButton></header>
-      <section class="subprocess-note"><span class="subprocess-note-mark" aria-hidden="true">i</span><p><strong>保存的画布内容，不是已发布流程</strong><br>片段可以没有开始或结束节点，也不会直接部署到流程引擎。</p></section>
-      <section class="subprocess-library-panel"><div class="subprocess-list-toolbar"><div><h2>片段库</h2><span>按最近更新时间排序</span></div><ElInput v-model="searchText" clearable placeholder="搜索片段名称或 key" class="subprocess-search" aria-label="搜索子流程片段名称或 key" @input="scheduleSearch" @keyup.enter="search" /></div>
+      <header class="subprocess-page-header"><div><h1>子流程片段</h1><p>管理可复用的局部流程。</p></div><ElButton class="subprocess-create-button" type="primary" size="large" @click="createFragment">新建片段</ElButton></header>
+      <section class="subprocess-library-panel"><div class="subprocess-list-toolbar"><div class="subprocess-list-heading"><h2>片段库</h2><span>按最近更新时间排序</span></div><ElInput v-model="searchText" clearable placeholder="搜索片段名称或 key" class="subprocess-search" aria-label="搜索子流程片段名称或 key" @input="scheduleSearch" @keyup.enter="search" /></div>
         <div v-if="error" class="subprocess-list-error" role="alert"><span>{{ error }}</span><ElButton @click="load(true)">重试</ElButton></div>
         <div v-else-if="loading && !fragments.length" class="subprocess-list-loading" role="status">正在读取片段库…</div>
         <div v-else-if="fragments.length || loading" class="subprocess-table">
@@ -236,6 +238,14 @@ onMounted(() => { if (isEditing.value) { editorName.value = fragmentName.value; 
             <template #cell-name="{ row }"><div class="subprocess-name-cell"><strong>{{ row.name }}</strong><span>{{ row.description || '暂无描述' }}</span></div></template>
             <template #cell-key="{ row }"><code class="subprocess-key">{{ row.key }}</code></template>
           </DataTable>
+          <div class="subprocess-mobile-list" aria-label="子流程片段列表">
+            <article v-for="fragment in fragments" :key="fragment.key" class="subprocess-mobile-card">
+              <div class="subprocess-mobile-card-heading"><h3>{{ fragment.name }}</h3><code class="subprocess-key">{{ fragment.key }}</code></div>
+              <p>{{ fragment.description || '暂无描述' }}</p>
+              <div class="subprocess-mobile-meta"><span>{{ fragment.displayJson.nodes.length }} 节点 · {{ fragment.displayJson.flows?.length ?? 0 }} 连线</span><time>{{ displayUpdatedAt(fragment.updatedAt) }}</time></div>
+              <div class="subprocess-mobile-actions"><ElButton text type="primary" @click="editFragment(fragment)">编辑</ElButton><ElButton text type="danger" :disabled="deletingKey === fragment.key" @click="deleteFragment(fragment)">删除</ElButton></div>
+            </article>
+          </div>
         </div>
         <ElEmpty v-else :description="searchText ? '没有找到匹配的片段' : '片段库还是空的'"><template #description><div class="subprocess-empty-copy"><strong>{{ searchText ? '没有找到匹配的片段' : '还没有子流程片段' }}</strong><span>{{ searchText ? '试试缩短名称或使用 key 搜索。' : '创建一个局部流程，之后可在主流程设计器中复用。' }}</span></div></template><ElButton v-if="!searchText" type="primary" @click="createFragment">新建第一个片段</ElButton></ElEmpty>
         <div v-if="fragments.length && hasMore" class="subprocess-load-more"><ElButton :loading="loadingMore" @click="load(false)">加载更多</ElButton></div><div v-else-if="fragments.length" class="subprocess-list-end">已显示全部片段</div>
@@ -247,17 +257,17 @@ onMounted(() => { if (isEditing.value) { editorName.value = fragmentName.value; 
 
 <style>
 .subprocess-page { --subprocess-ink: #173d32; --subprocess-muted: #708077; --subprocess-border: #e2e9e4; --subprocess-surface: #fff; min-height: calc(100vh - 64px); color: var(--subprocess-ink); }
-.subprocess-page:not(.is-editor) { max-width: 1380px; margin: 0 auto; padding: 42px 48px 64px; }
-.subprocess-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
-.subprocess-page-header h1, .subprocess-editor-header h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: -.4px; color: var(--subprocess-ink); }
-.subprocess-page-header p:not(.subprocess-eyebrow), .subprocess-explainer { margin: 10px 0 0; color: var(--subprocess-muted); font-size: 14px; line-height: 1.7; }
+.subprocess-page:not(.is-editor) { max-width: 1380px; margin: -24px auto 0; padding: 8px 48px 40px; }
+.subprocess-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
+.subprocess-page-header h1, .subprocess-editor-header h1 { margin: 0; font-size: 26px; line-height: 1.25; letter-spacing: -.4px; color: var(--subprocess-ink); }
+.subprocess-page-header p:not(.subprocess-eyebrow), .subprocess-explainer { margin: 6px 0 0; color: var(--subprocess-muted); font-size: 13px; line-height: 1.55; }
 .subprocess-eyebrow { margin: 0 0 8px; color: #71877c; font: 600 10px/1.4 'SFMono-Regular', Consolas, monospace; letter-spacing: 1.8px; }
 .subprocess-note { display: flex; gap: 13px; align-items: flex-start; margin: 0 0 25px; padding: 17px 19px; border: 1px solid #dce8df; border-radius: 8px; background: #f3f8f4; }
 .subprocess-note-mark { display: grid; flex: 0 0 22px; place-items: center; width: 22px; height: 22px; border: 1px solid #b7d0c0; border-radius: 50%; color: #36654e; font: 600 12px Georgia, serif; }
 .subprocess-note p { margin: 0; color: #64776b; font-size: 12px; line-height: 1.7; }
 .subprocess-note strong { color: #315744; font-size: 13px; font-weight: 600; }
 .subprocess-library-panel { overflow: hidden; border: 1px solid var(--subprocess-border); border-radius: 9px; background: var(--subprocess-surface); box-shadow: 0 8px 26px rgb(20 54 41 / 4%); }
-.subprocess-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 19px 22px; border-bottom: 1px solid #edf1ee; }
+.subprocess-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 18px; border-bottom: 1px solid #edf1ee; }
 .subprocess-list-toolbar > div { display: flex; align-items: baseline; gap: 12px; }
 .subprocess-list-toolbar h2 { margin: 0; font-size: 15px; font-weight: 650; }
 .subprocess-list-toolbar > div > span { color: #859187; font-size: 12px; }
@@ -271,9 +281,9 @@ onMounted(() => { if (isEditing.value) { editorName.value = fragmentName.value; 
 .subprocess-name-cell strong { overflow: hidden; color: #244337; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .subprocess-name-cell span { overflow: hidden; color: #63756a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .subprocess-key { display: inline-block; max-width: 100%; overflow: hidden; color: #50665a; font: 12px/1.6 'SFMono-Regular', Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.subprocess-table :deep(.data-table__actions) { display: flex; justify-content: center; gap: 8px; }
-.subprocess-table :deep(.data-table__actions .el-button) { min-height: 38px; padding: 0 8px; }
-.subprocess-table :deep(.data-table__actions .el-button:focus-visible), .subprocess-page :deep(.el-button:focus-visible) { outline: 2px solid var(--diagram-accent); outline-offset: 2px; }
+.subprocess-table .data-table__actions { display: flex; justify-content: center; gap: 8px; }
+.subprocess-table .data-table__actions .el-button { min-height: 38px; padding: 0 8px; }
+.subprocess-table .data-table__actions .el-button:focus-visible, .subprocess-page .el-button:focus-visible { outline: 2px solid var(--diagram-accent); outline-offset: 2px; }
 .subprocess-load-more { display: flex; justify-content: center; padding: 16px; border-top: 1px solid #f0f3f1; }
 .subprocess-list-end { padding: 17px; color: #98a39b; text-align: center; font-size: 11px; }
 .subprocess-empty-copy { display: grid; gap: 7px; color: #748278; font-size: 12px; }
@@ -289,25 +299,91 @@ onMounted(() => { if (isEditing.value) { editorName.value = fragmentName.value; 
 .subprocess-metadata { display: flex; align-items: flex-end; gap: 14px; padding: 14px 17px; border: 1px solid var(--subprocess-border); border-radius: 7px; background: #fff; }
 .subprocess-metadata label, .subprocess-metadata-dialog label { display: grid; flex: 1; gap: 7px; min-width: 0; color: #627569; font-size: 11px; }
 .subprocess-metadata code, .subprocess-key-pending { align-self: center; color: #85958a; font: 11px/1.5 'SFMono-Regular', Consolas, monospace; }
-.subprocess-editor-body :deep(.wfd) { min-height: 640px; }
-.subprocess-editor-body :deep(.wfd-toolbar) { display: flex; min-height: 48px; height: 48px; padding: 0 10px; }
-.subprocess-editor-body :deep(.wfd-brand) { display: none; }
-.subprocess-editor-body :deep(.wfd-toolbar-actions) { justify-content: flex-start; }
-.subprocess-editor-body :deep(.wfd-workspace) { min-height: 560px; }
-.subprocess-editor-body :deep(.wfd-node-library-group h3) { display: none; }
+.subprocess-editor-body .wfd { min-height: 640px; }
+.subprocess-editor-body .wfd-toolbar { display: flex; min-height: 48px; height: 48px; padding: 0 10px; }
+.subprocess-editor-body .wfd-brand { display: none; }
+.subprocess-editor-body .wfd-toolbar-actions { justify-content: flex-start; }
+.subprocess-editor-body .wfd-workspace { min-height: 560px; }
+.subprocess-editor-body .wfd-node-library-group h3 { display: none; }
 .subprocess-editor-loading, .subprocess-editor-error, .subprocess-list-loading { display: grid; place-items: center; min-height: 300px; color: #78867d; font-size: 13px; }
 .subprocess-editor-error { color: #a14942; }
 .subprocess-metadata-dialog { display: grid; gap: 18px; padding: 8px 2px; }
 @media (max-width: 760px) {
-  .subprocess-page:not(.is-editor) { padding: 26px 14px 44px; }
+  .subprocess-page:not(.is-editor) { margin-top: -14px; padding: 12px 14px 32px; }
   .subprocess-page-header, .subprocess-list-toolbar, .subprocess-editor-header { align-items: stretch; flex-direction: column; }
-  .subprocess-page-header { gap: 16px; }
-  .subprocess-page-header > .el-button { align-self: flex-start; }
+  .subprocess-page-header { align-items: center; flex-direction: row; gap: 10px; margin-bottom: 14px; }
+  .subprocess-page-header h1 { font-size: 22px; }
+  .subprocess-page-header p:not(.subprocess-eyebrow) { margin-top: 4px; font-size: 11px; line-height: 1.4; }
+  .subprocess-page-header > .el-button { flex: 0 0 auto; align-self: center; }
   .subprocess-list-toolbar > div { align-items: flex-start; flex-direction: column; gap: 4px; }
   .subprocess-search { width: 100%; }
+  .subprocess-list-toolbar { gap: 10px; padding: 11px 14px; }
   .subprocess-editor-header { gap: 12px; padding: 14px; }
   .subprocess-editor-actions { justify-content: flex-end; }
   .subprocess-metadata { align-items: stretch; flex-direction: column; }
   .subprocess-editor-body { padding: 10px; }
 }
+
+/* Preserve the shared workbench theme and add only page-specific interaction and density refinements. */
+.subprocess-page .el-button, .subprocess-page button { -webkit-tap-highlight-color: transparent; }
+.subprocess-page .el-button:active, .subprocess-page .subprocess-back:active { transform: scale(.98); }
+.subprocess-page .el-button { transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .12s ease; }
+.subprocess-page .el-button:focus-visible, .subprocess-page .subprocess-back:focus-visible { outline: 2px solid var(--diagram-accent); outline-offset: 3px; }
+.subprocess-page.is-editor { margin: -36px; min-height: calc(100dvh - 64px); background: #fff; }
+.subprocess-page.is-editor .subprocess-editor-header { justify-content: space-between; min-height: 60px; padding: 7px 20px; gap: 16px; }
+.subprocess-page.is-editor .subprocess-editor-heading { display: flex; align-items: center; gap: 16px; }
+.subprocess-page.is-editor .subprocess-back { min-height: 34px; margin: 0; white-space: nowrap; }
+.subprocess-page.is-editor .subprocess-editor-header h1 { overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.subprocess-page.is-editor .subprocess-editor-actions { gap: 7px; }
+.subprocess-page.is-editor .subprocess-editor-actions .el-button { min-height: 34px; padding: 0 12px; }
+.subprocess-page.is-editor .subprocess-editor-body { grid-template-rows: auto minmax(560px, 1fr); gap: 8px; min-height: calc(100dvh - 124px); padding: 9px 12px 12px; }
+.subprocess-page.is-editor .subprocess-metadata { gap: 12px; padding: 9px 12px; border-radius: 6px; }
+.subprocess-page.is-editor .subprocess-metadata label { gap: 4px; font-size: 10px; }
+.subprocess-page.is-editor .subprocess-metadata .el-input__wrapper { min-height: 32px; }
+.subprocess-page.is-editor .subprocess-editor-body .wfd { min-height: 560px; }
+.subprocess-page.is-editor .subprocess-editor-body .wfd-toolbar { min-height: 42px; height: 42px; }
+.subprocess-mobile-list { display: none; }
+.subprocess-mobile-card { display: grid; gap: 5px; }
+.subprocess-mobile-card-heading { min-width: 0; }
+.subprocess-mobile-card h3 { overflow: hidden; margin: 0; color: var(--color-text-primary, #244337); font-size: 14px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.subprocess-mobile-card > p { overflow: hidden; margin: 0; color: var(--color-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.subprocess-mobile-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--color-text-secondary); font-size: 10px; }
+.subprocess-mobile-meta time { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subprocess-mobile-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 760px) {
+  .subprocess-page.is-editor { margin: -24px -14px; min-height: calc(100dvh - 64px); }
+  .subprocess-page.is-editor .subprocess-editor-header { align-items: center; min-height: 55px; padding: 7px 12px; }
+  .subprocess-page.is-editor .subprocess-editor-heading { gap: 10px; }
+  .subprocess-page.is-editor .subprocess-back { min-height: 32px; font-size: 11px; }
+  .subprocess-page.is-editor .subprocess-editor-header h1 { font-size: 16px; }
+  .subprocess-page.is-editor .subprocess-editor-actions .el-button { min-height: 32px; padding: 0 10px; }
+  .subprocess-page.is-editor .subprocess-editor-body { min-height: calc(100dvh - 110px); padding: 8px; }
+}
+@media (max-width: 600px) {
+  .subprocess-table > .data-table { display: none; }
+  .subprocess-mobile-list { display: grid; }
+  .subprocess-mobile-card { min-width: 0; padding: 14px 15px 10px; border-bottom: 1px solid var(--color-border-soft); }
+  .subprocess-mobile-card:last-child { border-bottom: 0; }
+  .subprocess-mobile-card-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+  .subprocess-mobile-actions { margin-top: 4px; }
+  .subprocess-mobile-actions .el-button { min-height: 34px; }
+}
+@media (max-width: 480px) {
+  .subprocess-page.is-editor .subprocess-editor-header { align-items: center; flex-direction: row; min-height: 54px; }
+  .subprocess-page.is-editor .subprocess-editor-heading { align-items: center; flex: 1; flex-direction: row; gap: 7px; min-width: 0; }
+  .subprocess-page.is-editor .subprocess-back { flex: 0 0 auto; min-height: 28px; font-size: 10px; }
+  .subprocess-page.is-editor .subprocess-editor-header h1 { min-width: 0; flex: 1; font-size: 13px; }
+  .subprocess-page.is-editor .subprocess-editor-actions { flex: 0 0 auto; margin-top: 0; }
+  .subprocess-page.is-editor .subprocess-metadata { gap: 8px; padding: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .subprocess-page *, .subprocess-page *::before, .subprocess-page *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .subprocess-page .el-button:active, .subprocess-page .subprocess-back:active { transform: none; }
+}
+
 </style>

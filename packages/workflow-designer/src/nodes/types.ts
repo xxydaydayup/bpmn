@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import type { WorkflowNodeRecord, WorkflowNodeType, WorkflowSubProcessDataSource, WorkflowValidationIssue } from '../types'
+import type { WorkflowFormDataSource, WorkflowNodeRecord, WorkflowNodeType, WorkflowSubProcessDataSource, WorkflowValidationIssue } from '../types'
 
 export interface WorkflowNodePropertyEditorProps {
   model: Readonly<WorkflowNodeRecord>
@@ -8,12 +8,13 @@ export interface WorkflowNodePropertyEditorProps {
   beginEdit: () => void
   update: (key: string, value: unknown) => void
   subprocessFragments?: WorkflowSubProcessDataSource
+  businessForms?: WorkflowFormDataSource
 }
 
 /**
  * 节点定义契约（对齐 Dify 的 NodeDefault）
  * 每种节点一个目录，default.ts 是唯一登记入口：
- * 元数据、默认值、节点级校验、连接规则全部收敛在此文件。
+ * 元数据、编辑默认值和连接规则在此登记；协议语义校验由 SDK 负责。
  */
 export interface WorkflowNodeDefinition {
   type: WorkflowNodeType
@@ -31,7 +32,7 @@ export interface WorkflowNodeDefinition {
   defaultValue?: Partial<WorkflowNodeRecord>
   /** 该节点专属的属性编辑 UI；模型更新仍由设计器统一提交 */
   propertyEditor?: Component<WorkflowNodePropertyEditorProps>
-  /** 该节点是否允许配置提醒；流程级校验据此拒绝其他节点携带的提醒 */
+  /** 该节点是否在属性面板展示提醒配置；实际协议约束由 SDK 检查 */
   supportsReminder?: boolean
   /** 节点自身字段校验；跨节点和流程结构规则由全局校验负责 */
   checkValid?: (node: WorkflowNodeRecord) => WorkflowValidationIssue[]

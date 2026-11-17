@@ -40,6 +40,16 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 设计器后续会持续新增节点类型和节点属性来扩展能力。按 ADR-0005 的契约，新增影响编译的节点或字段时，须先升级正式业务 JSON 契约并实现后端编译能力，再同步 schema 副本、前端类型与映射；未升级前，未知业务字段/节点保持原样并阻止编译。`subProcess.process` 的正式编译字段以 [业务 JSON 规范](http://192.168.124.202:8085/bpmn/spec) 为准，Schema 副本的来源说明也应引用该后端规范。
 
-当前契约副本和真实立项审批 fixture 分别见 schema/workflow-model-v1.schema.json 与 src/fixtures/project-approval.json。它们基于 D:/Code/github.com/xxydaydayup/workflow/src/api/workflowModel.ts 和该仓库的业务样例，于 2026-11-03 迁移；后端编译器维护方发布正式 Schema 后应以其为准更新此副本。
+标准模型类型、Schema 与协议校验由独立 [@workflow/sdk](../workflow-sdk/README.md) 提供，基线为后端 `/bpmn/spec` version 1 的 2026-11-16 快照。`schema/workflow-model-v1.schema.json` 为 SDK Schema 的同步下载副本，使用 `pnpm --filter @workflow/designer sync:schema` 更新，不单独维护；真实立项审批 fixture 位于 `src/fixtures/project-approval.json`。后端执行契约仍由编译器维护方负责。
 
-根仓库 /workflow-designer 是集成示例：提供 JSON 查看/粘贴或文件导入、JSON 转 XML、BPMN XML 结果查看、基础流程检查和显式确认的业务任务模板发布。设计器库不假定部署 API；在此宿主中，compile 回调使用 /api/v1/bpmn/json2xml，deploy 回调复用 /api/v1/template，并在不确定的网络结果时允许查询模板状态。初始自动布局由宿主通过 autoLayoutOnInit 显式启用，传入视口或导入的模型坐标均保持不变。/designer 继续提供 BPMN/XML 直接建模与引擎部署。
+SDK 允许省略名称、坐标和 flows；设计器补齐编辑默认值，并继续检查唯一开始/结束、名称、普通回路和连接策略。标准字段/会签/分支/等待/提醒/子流程语义交由 SDK 检查，诊断通过 path 与 scope 映射到画布；扩展校验仍可追加。SDK 支持 parallel 及旧类型警告透传，当前画布尚不支持这些节点的编辑，导入后保留并禁止编译。
+
+宿主可从 `@workflow/designer` 导入 `toWorkflowCompilerJson(model)`：它只剥离已知流程画布宽高与片段来源元数据，再调用 SDK 的校验/导出。节点 x/y/width/height 保留，未知业务字段不剥离。视口、主题和路由继续留在设计稿信封中。需要单独使用模型能力的接入方安装 SDK 即可，完整流程见 [接入指南](../workflow-sdk/docs/integration.md)。
+
+根仓库 /workflow-designer 是集成示例：提供 JSON 查看/粘贴或文件导入、JSON 转 XML、BPMN XML 结果查看、基础流程检查和显式确认的业务任务模板发布。设计器库不假定部署 API；在此宿主中，compile 回调使用 /api/v1/bpmn/json2xml，deploy 回调复用 /api/v1/template，并在不确定的网络结果时允许查询模板状态。示例流程坐标预先排成适合首次展示的纵向布局；页面首次打开和导入模型时保留已有节点坐标，只有用户主动选择“自动布局”时才运行 ELK 重排。保存的编辑器视口仍会在打开时恢复。/designer 继续提供 BPMN/XML 直接建模与引擎部署。
+
+## 业务表单目录扩展
+
+宿主通过 extensions.businessForms 注入 WorkflowFormDataSource：list({ nameLike, firstResult, maxResults }) 返回 WorkflowFormOption[]，get(key) 返回当前目录详情；选项包含 key、name、version、status。宿主负责只返回已发布且可用项、鉴权及 API，包不直接请求后端。
+
+审批和多人审批属性面板显示选择器，新选择保存 bizFormKey: "form:<key>@<version>"。既有无版本、@latest、route: 引用按原值保留并说明语义；旧 form 字段独立保留。固定版本的存在及可用性由宿主在编译/发布前校验。本仓库示例宿主复用表单 gateway，实际变量/任务读取及使用步骤见 [业务人工任务表单](../../docs/business-forms.md)。

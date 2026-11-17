@@ -15,7 +15,7 @@ const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'is-collapsed': collapsed, 'designer-shell': isWorkflowEditor, 'workflow-designer-shell': route.path === '/workflow-designer' }">
+  <div class="app-shell" :class="{ 'is-collapsed': collapsed, 'designer-shell': isWorkflowEditor, 'subprocess-editor-shell': route.path === '/sub-processes' && route.query.editor === '1', 'workflow-designer-shell': route.path === '/workflow-designer' }">
     <aside class="sidebar">
       <RouterLink to="/" class="brand" aria-label="流程工作台首页">
         <span class="brand-mark"><ElIcon :size="22"><Connection /></ElIcon></span>
@@ -40,6 +40,10 @@ const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
         <ElMenuItem index="/workflow-designer" aria-label="业务工作流设计器">
           <ElIcon><Connection /></ElIcon>
           <template #title><span>业务工作流设计</span></template>
+        </ElMenuItem>
+        <ElMenuItem index="/forms" aria-label="业务表单">
+          <ElIcon><Tickets /></ElIcon>
+          <template #title><span>业务表单</span></template>
         </ElMenuItem>
         <ElMenuItem index="/sub-processes" aria-label="子流程片段">
           <ElIcon><Files /></ElIcon>

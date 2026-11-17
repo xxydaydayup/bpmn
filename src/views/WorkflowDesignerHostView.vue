@@ -9,6 +9,7 @@ import { businessWorkflowGateway, subProcessLibraryGateway, toBpmnCompilerJson, 
 import { diagramCSSVariables } from '@/bpmn/theme'
 import '@/styles/designer.css'
 import axios from 'axios'
+import { businessFormDataSource, validateFormBindings } from '@/api/workflow/formBinding'
 
 const document = ref<WorkflowInput>({ format: 'workflow-designer', version: 1, model: fixture as WorkflowModel, editor: { theme: { accent: '#28705d' } } } satisfies WorkflowDesignDocument)
 const router = useRouter()
@@ -76,6 +77,7 @@ const verifyDeployment = async (model: WorkflowModel) => {
 const isDeployedCurrentModel = computed(() => Boolean(deployment.value && deployedModel.value === JSON.stringify(currentModel.value)))
 const compile = async (model: WorkflowModel) => {
   compileNotice.value = ''
+  await validateFormBindings(model)
   const response = await request<{ code: string; data?: { bpmnXml?: string }; message?: string }>({ method: 'POST', url: '/v1/bpmn/json2xml', data: toBpmnCompilerJson(model) })
   const bpmnXml = response?.data?.bpmnXml
   if (response?.code !== 'OK') throw new Error(response?.message || '后端编译失败')
@@ -90,7 +92,7 @@ const compile = async (model: WorkflowModel) => {
     <header class="designer-document-header">
       <div class="designer-document-title"><div class="designer-breadcrumb">工作空间 <span>/</span> 业务流程设计</div><div class="designer-title-line"><h1>{{ currentModel.processName || '未命名流程' }}</h1><span class="designer-draft">业务模型 · {{ currentModel.nodes.length }} 个节点</span></div></div>
     </header>
-    <WorkflowDesigner v-model="document" :compile="compile" :deploy="deploy" :verify-deployment="verifyDeployment" :auto-layout-on-init="true" :extensions="{ subprocessFragments: subProcessLibraryGateway, nodeTypes: ['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'] }">
+    <WorkflowDesigner v-model="document" :compile="compile" :deploy="deploy" :verify-deployment="verifyDeployment" :extensions="{ subprocessFragments: subProcessLibraryGateway, businessForms: businessFormDataSource, nodeTypes: ['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'] }">
       <template #toolbar-end>
         <a class="subprocess-manage-link" :href="router.resolve({ name: 'sub-processes' }).href" target="_blank" rel="noopener noreferrer">管理子流程片段 <span aria-hidden="true">↗</span></a>
       </template>

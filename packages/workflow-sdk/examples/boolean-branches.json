@@ -1,0 +1,45 @@
+{
+  "processId": "boolean_branches",
+  "nodes": [
+    {
+      "id": "s",
+      "type": "start"
+    },
+    {
+      "id": "review",
+      "type": "approval"
+    },
+    {
+      "id": "g",
+      "type": "condition"
+    },
+    {
+      "id": "yes",
+      "type": "end"
+    },
+    {
+      "id": "no",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "s",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "g"
+    },
+    {
+      "source": "g",
+      "target": "yes",
+      "branch": "pass"
+    },
+    {
+      "source": "g",
+      "target": "no",
+      "branch": "reject"
+    }
+  ]
+}

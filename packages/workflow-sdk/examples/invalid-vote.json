@@ -1,0 +1,28 @@
+{
+  "processId": "invalid_vote",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "review",
+      "type": "countersign",
+      "approveMode": "VOTE"
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "end"
+    }
+  ]
+}

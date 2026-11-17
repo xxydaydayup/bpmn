@@ -1,0 +1,27 @@
+{
+  "name": "@workflow/sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Framework independent business workflow model contract, validation and compiler JSON export",
+  "sideEffects": false,
+  "engines": { "node": "^20.19.0 || >=22.12.0" },
+  "files": ["dist", "schema", "contract", "examples", "docs", "README.md"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./schema/workflow-model-v1.schema.json": "./schema/workflow-model-v1.schema.json",
+    "./contract/*": "./contract/*",
+    "./examples/*": "./examples/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/write-schema.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && node --test tests/*.test.mjs",
+    "prepack": "pnpm build",
+    "verify:package": "node scripts/verify-package.mjs",
+    "test:backend": "pnpm build && node scripts/check-backend.mjs"
+  },
+  "devDependencies": { "ajv": "^8.17.1", "typescript": "~5.9.2" }
+}

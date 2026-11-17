@@ -1,0 +1,47 @@
+{
+  "processId": "state_branches",
+  "nodes": [
+    {
+      "id": "s",
+      "type": "start"
+    },
+    {
+      "id": "g",
+      "type": "condition",
+      "statusVariable": "business_status"
+    },
+    {
+      "id": "ok",
+      "type": "end"
+    },
+    {
+      "id": "retry",
+      "type": "end"
+    },
+    {
+      "id": "fallback",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "s",
+      "target": "g"
+    },
+    {
+      "source": "g",
+      "target": "ok",
+      "branch": "accepted"
+    },
+    {
+      "source": "g",
+      "target": "retry",
+      "branch": "accepted"
+    },
+    {
+      "source": "g",
+      "target": "fallback",
+      "branch": "default"
+    }
+  ]
+}

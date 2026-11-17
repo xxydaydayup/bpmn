@@ -1,0 +1,183 @@
+{
+  "processId": "nested_review",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "left",
+      "type": "subProcess",
+      "process": {
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start"
+          },
+          {
+            "id": "apply",
+            "type": "approval"
+          },
+          {
+            "id": "inner",
+            "type": "subProcess",
+            "process": {
+              "nodes": [
+                {
+                  "id": "start",
+                  "type": "start"
+                },
+                {
+                  "id": "apply",
+                  "type": "approval",
+                  "x": 20,
+                  "y": 80,
+                  "reminder": {
+                    "action": "return",
+                    "target": "revise"
+                  }
+                },
+                {
+                  "id": "revise",
+                  "type": "approval"
+                },
+                {
+                  "id": "end",
+                  "type": "end"
+                }
+              ],
+              "flows": [
+                {
+                  "source": "start",
+                  "target": "apply"
+                },
+                {
+                  "source": "apply",
+                  "target": "revise"
+                },
+                {
+                  "source": "revise",
+                  "target": "end"
+                }
+              ]
+            }
+          },
+          {
+            "id": "end",
+            "type": "end"
+          }
+        ],
+        "flows": [
+          {
+            "source": "start",
+            "target": "apply"
+          },
+          {
+            "source": "apply",
+            "target": "inner"
+          },
+          {
+            "source": "inner",
+            "target": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "right",
+      "type": "subProcess",
+      "process": {
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start"
+          },
+          {
+            "id": "apply",
+            "type": "approval"
+          },
+          {
+            "id": "inner",
+            "type": "subProcess",
+            "process": {
+              "nodes": [
+                {
+                  "id": "start",
+                  "type": "start"
+                },
+                {
+                  "id": "apply",
+                  "type": "approval",
+                  "x": 20,
+                  "y": 80,
+                  "reminder": {
+                    "action": "return",
+                    "target": "revise"
+                  }
+                },
+                {
+                  "id": "revise",
+                  "type": "approval"
+                },
+                {
+                  "id": "end",
+                  "type": "end"
+                }
+              ],
+              "flows": [
+                {
+                  "source": "start",
+                  "target": "apply"
+                },
+                {
+                  "source": "apply",
+                  "target": "revise"
+                },
+                {
+                  "source": "revise",
+                  "target": "end"
+                }
+              ]
+            }
+          },
+          {
+            "id": "end",
+            "type": "end"
+          }
+        ],
+        "flows": [
+          {
+            "source": "start",
+            "target": "apply"
+          },
+          {
+            "source": "apply",
+            "target": "inner"
+          },
+          {
+            "source": "inner",
+            "target": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "left"
+    },
+    {
+      "source": "left",
+      "target": "right"
+    },
+    {
+      "source": "right",
+      "target": "end"
+    }
+  ]
+}

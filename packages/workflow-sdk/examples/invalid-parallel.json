@@ -1,0 +1,56 @@
+{
+  "processId": "parallel_review",
+  "nodes": [
+    {
+      "id": "s",
+      "type": "start"
+    },
+    {
+      "id": "fork",
+      "type": "parallel"
+    },
+    {
+      "id": "a",
+      "type": "approval"
+    },
+    {
+      "id": "b",
+      "type": "approval"
+    },
+    {
+      "id": "join",
+      "type": "parallel"
+    },
+    {
+      "id": "e",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "s",
+      "target": "fork"
+    },
+    {
+      "source": "fork",
+      "target": "a",
+      "conditionExpression": "${true}"
+    },
+    {
+      "source": "fork",
+      "target": "b"
+    },
+    {
+      "source": "a",
+      "target": "join"
+    },
+    {
+      "source": "b",
+      "target": "join"
+    },
+    {
+      "source": "join",
+      "target": "e"
+    }
+  ]
+}

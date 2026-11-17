@@ -1,0 +1,54 @@
+{
+  "processId": "timeout_actions",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "apply",
+      "type": "approval",
+      "reminder": {
+        "duration": "PT1H",
+        "action": "notify"
+      }
+    },
+    {
+      "id": "review",
+      "type": "approval",
+      "reminder": {
+        "action": "return",
+        "target": "apply"
+      }
+    },
+    {
+      "id": "final",
+      "type": "approval",
+      "reminder": {
+        "action": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "apply"
+    },
+    {
+      "source": "apply",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "final"
+    },
+    {
+      "source": "final",
+      "target": "end"
+    }
+  ]
+}

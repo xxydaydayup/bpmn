@@ -1,0 +1,30 @@
+{
+  "processId": "service_vote",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "check",
+      "type": "service",
+      "countersign": true,
+      "approveMode": "ANY",
+      "sequential": false
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "check"
+    },
+    {
+      "source": "check",
+      "target": "end"
+    }
+  ]
+}

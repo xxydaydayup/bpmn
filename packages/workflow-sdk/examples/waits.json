@@ -1,0 +1,46 @@
+{
+  "processId": "message_and_timer",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "ack",
+      "type": "receive",
+      "messageName": "request.acknowledged"
+    },
+    {
+      "id": "delay",
+      "type": "timer",
+      "timerType": "duration",
+      "timerValue": "PT30M"
+    },
+    {
+      "id": "runtime",
+      "type": "timer"
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "ack"
+    },
+    {
+      "source": "ack",
+      "target": "delay"
+    },
+    {
+      "source": "delay",
+      "target": "runtime"
+    },
+    {
+      "source": "runtime",
+      "target": "end"
+    }
+  ]
+}

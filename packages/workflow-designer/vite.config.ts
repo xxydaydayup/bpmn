@@ -8,7 +8,7 @@ export default defineConfig({
     emptyOutDir: false,
     lib: { entry: 'src/index.ts', formats: ['es'], fileName: 'index', cssFileName: 'style' },
     rollupOptions: {
-      external: ['vue', '@vue-flow/core', 'elkjs/lib/elk.bundled.js'],
+      external: ['vue', '@vue-flow/core', '@workflow/sdk', 'elkjs/lib/elk.bundled.js'],
       output: {
         globals: { vue: 'Vue', '@vue-flow/core': 'VueFlow', 'elkjs/lib/elk.bundled.js': 'ELK' },
       },

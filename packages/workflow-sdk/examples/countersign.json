@@ -1,0 +1,31 @@
+{
+  "processId": "human_vote",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "review",
+      "type": "countersign",
+      "approveMode": "VOTE",
+      "passRate": "0.7",
+      "sequential": false,
+      "allowAddSigner": false
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "end"
+    }
+  ]
+}

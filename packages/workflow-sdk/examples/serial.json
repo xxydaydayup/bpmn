@@ -1,0 +1,32 @@
+{
+  "processId": "serial_approval",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "apply",
+      "type": "approval",
+      "assignee": "demo-user",
+      "allowTransfer": false,
+      "form": "legacy-form",
+      "bizFormKey": "form:request@3",
+      "bizType": "request.review"
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "apply"
+    },
+    {
+      "source": "apply",
+      "target": "end"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "processId": "single_service",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start"
+    },
+    {
+      "id": "check",
+      "type": "service"
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "flows": [
+    {
+      "source": "start",
+      "target": "check"
+    },
+    {
+      "source": "check",
+      "target": "end"
+    }
+  ]
+}

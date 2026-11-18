@@ -34,15 +34,19 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 所有内置节点都可在通用属性面板设置可选字符串 `bizType`，用于记录宿主业务系统解释的节点级业务标识。该值随业务工作流模型及设计稿导入导出，并传入宿主 `compile(model)` 回调；设计器不校验其格式或唯一性，也不将它映射到 BPMN XML 或 `params_rules`。bizType 是 WorkflowModel v1 的已知字段，空值会从节点记录移除。
 
+所有内置节点也支持「业务数据（bizJson）」多行编辑，片段模式同样可用；原有 bizType 在片段模式中隐藏。bizJson 是可选字符串，允许非 JSON 文本，内容不解析、不格式化、不 trim。未填写时保持缺省；UI 提交空字符串会删除字段，导入显式空字符串和纯空白字符串则保留。对象、数组、null、数字和布尔值保留原输入并报 field-type，禁止编译。宿主完整自定义属性编辑器继续优先于默认面板。
+
+bizJson 随 v-model、设计稿、模型、模板复制、片段快照和 compile 回调保留。子流程容器及每层内部节点分别设置，复制新 ID 不修改字符串内容。后端将其写为 camunda:property(name=bizJson) 模板默认值，并声明实例变量 {activityId}_bizJson 优先，删除后回退默认值；内部 activityId 以后端展开结果为准。2026-11-18 编译核对发现后端会去掉首尾空白，详见 [bizJson 验证记录](../workflow-sdk/docs/node-bizjson-verification.md)。本次仅验证编辑与编译，未验收实例变量覆盖/回退。
+
 ## 扩展能力
 
 设计器支持 `type: 'subProcess'` 的嵌入式子流程节点。选择节点属性中的片段后，设计稿保存片段库来源 key/name 与 `process` 内容快照；宿主提交编译前会剔除来源字段和片段画布宽高，只发送后端 `/bpmn/spec` 规定的递归流程字段。编译器按规范展开完整子流程（包括逐层前缀化内部节点与连线 ID，并重写同层提醒目标）。设计器片段编辑模式允许不含开始或结束节点，保存前要求至少一个节点；管理页面和 API 仍由宿主提供。片段库后续修改不会自动改变已保存节点快照。
 
 设计器后续会持续新增节点类型和节点属性来扩展能力。按 ADR-0005 的契约，新增影响编译的节点或字段时，须先升级正式业务 JSON 契约并实现后端编译能力，再同步 schema 副本、前端类型与映射；未升级前，未知业务字段/节点保持原样并阻止编译。`subProcess.process` 的正式编译字段以 [业务 JSON 规范](http://192.168.124.202:8085/bpmn/spec) 为准，Schema 副本的来源说明也应引用该后端规范。
 
-标准模型类型、Schema 与协议校验由独立 [@workflow/sdk](../workflow-sdk/README.md) 提供，基线为后端 `/bpmn/spec` version 1 的 2026-11-16 快照。`schema/workflow-model-v1.schema.json` 为 SDK Schema 的同步下载副本，使用 `pnpm --filter @workflow/designer sync:schema` 更新，不单独维护；真实立项审批 fixture 位于 `src/fixtures/project-approval.json`。后端执行契约仍由编译器维护方负责。
+标准模型类型、Schema 与协议校验由独立 [@workflow/sdk](../workflow-sdk/README.md) 提供，基线为后端 `/bpmn/spec` version 1 的 2026-11-18 快照（含 bizJson，旧快照保留）。`schema/workflow-model-v1.schema.json` 为 SDK Schema 的同步下载副本，使用 `pnpm --filter @workflow/designer sync:schema` 更新，不单独维护；真实立项审批 fixture 位于 `src/fixtures/project-approval.json`。后端执行契约仍由编译器维护方负责。
 
-SDK 允许省略名称、坐标和 flows；设计器补齐编辑默认值，并继续检查唯一开始/结束、名称、普通回路和连接策略。标准字段/会签/分支/等待/提醒/子流程语义交由 SDK 检查，诊断通过 path 与 scope 映射到画布；扩展校验仍可追加。SDK 支持 parallel 及旧类型警告透传，当前画布尚不支持这些节点的编辑，导入后保留并禁止编译。
+SDK 允许省略名称、坐标和 flows；设计器补齐编辑默认值，并继续检查唯一开始/结束、名称、普通回路和连接策略。标准字段/会签/分支/等待/提醒/子流程语义交由 SDK 检查，诊断通过 path 与 scope 映射到画布；扩展校验仍可追加。设计器支持 SDK 的 parallel 并行网关，可从流程控制节点库添加。属性按入出线说明分流、汇合或先汇合再分流，不创建待办、不代表审批通过。并行出线禁止新增 branch/conditionExpression；非法导入保留字段并阻止编译。旧兼容类型继续保留并提示画布能力限制。基本编辑、嵌套检查、片段复用、真实编译与三次隔离实例汇合已验证，分层结果记录在 [并行网关验证说明](docs/parallel-gateway-verification.md)。
 
 宿主可从 `@workflow/designer` 导入 `toWorkflowCompilerJson(model)`：它只剥离已知流程画布宽高与片段来源元数据，再调用 SDK 的校验/导出。节点 x/y/width/height 保留，未知业务字段不剥离。视口、主题和路由继续留在设计稿信封中。需要单独使用模型能力的接入方安装 SDK 即可，完整流程见 [接入指南](../workflow-sdk/docs/integration.md)。
 

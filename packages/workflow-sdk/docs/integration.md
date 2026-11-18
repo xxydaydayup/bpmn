@@ -31,7 +31,28 @@ export function prepareModel(partnerOutput: unknown) {
 
 校验覆盖结构、同层 ID / 引用、跨层连接、会签比例、操作开关、分支、等待和超时组合。Schema 通过只代表结构正确，还需语义校验。表达式保留原文，不在 SDK 中运行。未知业务数据报错且保留，接入方应修正映射或与平台协商协议升级。
 
+## 节点业务数据
+
+bizJson 是节点公共的可选 string，业务系统解释字符串内容，允许非 JSON 文本。传字符串而非对象，不需要额外 JSON.stringify；外层请求只正常序列化一次。SDK 和设计器原样保留空白、中文、换行、引号和特殊字符，不解析、trim、格式化或改写内部 ID。未配置时缺省；导入显式空字符串和纯空白字符串保留，设计器属性框清空会删除字段。错误类型保留原输入并报 field-type，未知字段仍会阻止编译。
+
+两层嵌套可用已有函数入口构造：
+
+```ts
+import { defineWorkflow, subProcess, approval } from '@workflow/sdk/definition'
+const model = defineWorkflow({ key: 'business_data' },
+  subProcess('outer', subProcess('inner',
+    approval('review', { bizJson: '中文 <tag>& 业务数据' }),
+    { bizJson: '内层容器默认值' }),
+  { bizJson: '外层容器默认值' }),
+).toJSON()
+```
+
+片段编辑器保存公开 exportDesign().model 后，可通过已有 subprocessFragments 数据源引用。选择时保存独立快照，片段库变化不会自动改写，显式刷新才更新；复制模型的新 ID 不修改 bizJson 内部内容。compile 请求与发布 display-json 保留各层原文。
+
+后端编译把值写入 camunda:property(name=bizJson) 作为模板默认值。后端声明实例变量 {activityId}_bizJson 优先，删除变量后回退模板默认值；上例内部节点的 activityId 以编译后实际展开值为准（本次为 outer_inner_review），SDK 不提前加前缀，也不自动生成变量或 params_rules。本次只核对编译 XML，未部署、启动或验证变量覆盖/回退。2026-11-18 后端会截去首尾空白，见 [验证记录](./node-bizjson-verification.md)。
+
 ## 编译与发布
+
 
 | 服务 | 路径 | 用途 |
 | --- | --- | --- |
@@ -72,7 +93,7 @@ async function compileAndPublish(model: WorkflowModel, hostRequest: (path: strin
 
 发布后通过模板详情 `GET /api/v1/template/{templateKey}` 读取全局变量和 `params_rules`；按当前部署实际返回结构解析规则。`source: start` 的必需且未固化配置在启动时提供；`source: complete` 在相应人工任务完成时提供；`source: engine` 由后端负责。规则中的 nodeId、nodeName、nodeType 是元数据，不是需要原样提交的变量。
 
-宿主负责保存 businessKey 与返回的流程实例/业务实例标识关联、任务权限、表单数据和状态同步。启动与任务完成是后端能力，SDK 第一版无运行时 API。
+宿主负责保存 businessKey 与返回的流程实例/业务实例标识关联、任务权限、表单数据和状态同步。SDK 0.2.0 可通过 [client 入口](./function-sdk.md) 组织运行请求；下面保留直接 HTTP 的协议示例。
 
 ```ts
 // 示例模型的审批节点 id 为 review，办理人留空；由后端规则要求启动时提供。
@@ -84,15 +105,15 @@ const started = await hostRequest('/api/v1/task/instances/start', {
   }),
 })
 // 记录 started 中的实例标识。查询条件使用实际网关 Swagger 的字段。
-const tasks = await hostRequest('/api/v1/tasks?businessKey=expense-2026-001', { method: 'GET' })
+const tasks = await hostRequest('/api/v1/tasks?processInstanceId=' + encodeURIComponent(processInstanceId), { method: 'GET' })
 const taskId = selectCurrentTaskId(tasks)
 await hostRequest('/api/v1/tasks/' + encodeURIComponent(taskId) + '/complete', {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ variables: { review_approved: true } }),
+  body: JSON.stringify({ variables: { review_approved: { value: true } } }),
 })
 ```
 
-以上为宿主集成片段，返回结构应按部署版本 Swagger 核对。业务网关使用普通变量值，不套用 Camunda REST 的变量包装。也可以使用按节点传参的 `start_biz` / `complete_biz`：`nodes: [{ nodeId, nodeType, fields }]` 交由后端拼接变量名。新启动接口同时有 nodes 与 variables 时，同名配置以 nodes 为准；完成时只传当前任务节点。不要重复给字段加前缀。
+以上为宿主集成片段；启动 variables 为普通值，标准完成与消息 variables 按 `{ value }` 包装。approved 仅在当前任务规则声明时提交，无结果分支的普通填写任务可只提交表单字段。既有 `start_biz` / `complete_biz` 按节点机械拼接前缀，保留作为宿主调试入口；SDK 高层只使用标准 start/complete，以保留公共 vote 与表单原 key，并检测冲突。
 
 | 执行配置 | 使用约定 |
 | --- | --- |

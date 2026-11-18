@@ -47,9 +47,9 @@ pnpm preview    # 预览构建结果
 
 ## 标准业务模型 SDK
 
-新增独立的 `@workflow/sdk`，提供 WorkflowModel v1 类型、标准 JSON Schema、离线校验和编译 JSON 导出。第三方设计器在自己的项目中将 XML/JSON 转成标准模型即可接入，无需嵌入本平台页面；SDK 不依赖 Vue 或 DOM。现有业务设计器已复用该协议校验，保留编辑规则与设计稿。SDK 支持 parallel，当前画布尚不可编辑此类型，导入后保留并限制编译。
+新增独立的 `@workflow/sdk`，提供 WorkflowModel v1 类型、标准 JSON Schema、离线校验和编译 JSON 导出。第三方设计器在自己的项目中将 XML/JSON 转成标准模型即可接入，无需嵌入本平台页面；SDK 不依赖 Vue 或 DOM。现有业务设计器已复用该协议校验，保留编辑规则与设计稿。业务设计器现已支持 parallel 并行网关的基本编辑、设计稿往返和后端 XML 编译；分流激活全部出线，汇合等待全部入线。支持嵌套检查、片段复用和并行审批模板；新设计器产物已验证两种办理顺序及内外层汇合，见[分层验证记录](packages/workflow-designer/docs/parallel-gateway-verification.md)。
 
-使用方式见 [SDK 说明](packages/workflow-sdk/README.md) 和 [完整接入指南](packages/workflow-sdk/docs/integration.md)。运行 `pnpm pack:sdk` 生成 `.scratch/workflow-model-sdk/artifacts/workflow-sdk-0.1.0.tgz`；只生成安装包，不发布 npm。后端仍负责 XML、参数规则、部署和实例执行。
+SDK 0.2.0 新增 `@workflow/sdk/definition` 函数定义入口与 `@workflow/sdk/client` 业务网关入口，覆盖编译、发布、参数映射、启动/办理、消息、版本/进度/历史与重派；模型入口仍保持离线兼容。宿主业务设计器的编译/发布通过 request adapter 复用客户端。使用方式见 [SDK 说明](packages/workflow-sdk/README.md)、[函数 SDK 指南](packages/workflow-sdk/docs/function-sdk.md) 和 [验收边界](packages/workflow-sdk/docs/function-sdk-verification.md)。运行 `pnpm pack:sdk` 生成 `.scratch/workflow-model-sdk/artifacts/workflow-sdk-0.2.0.tgz`；只生成安装包，不发布 npm。后端仍负责 XML、参数规则、部署、权限和实例执行。人工决定按任务规则兼容 passed 与旧 approved/vote；入口动态分支仍存在后端必填校验差异，见验收边界。
 
 ## 当前范围
 
@@ -60,13 +60,14 @@ pnpm preview    # 预览构建结果
 - `DataTable`：基于 Element Plus 的类型化列表格，支持列定义、Vue 单元格插槽、统一空值、金额/日期/标签/链接/字典/Tooltip/状态/枚举渲染；分页与数据请求由页面负责。
 - 表格示例使用本地静态数据，无需后端即可运行；Camunda 管理台流程定义列表复用 `DataTable`，保留页面查询、分页、行操作和详情联动。
 - BPMN/XML 编辑器（/designer）：默认展示“开始 → 提交需求 → 确认需求 → 结束”，支持绘图、XML 文件或粘贴导入、XML 编辑与复制、导出、当前画布部署和适应画布。
-- 业务工作流设计器（/workflow-designer）：独立的 Vue Flow workspace 组件，编辑业务 WorkflowModel v1，支持稳定的自上而下初始/手动 ELK 自动布局、按人工与服务/流程事件/流程控制分组的节点库、节点库与属性面板独立折叠、拖动时实时跟随的正交连线、撤销重做、所有内置节点的可选 bizType 业务标识、多人审批（顺序、提醒、ALL/ANY/VOTE）、服务节点多服务会签（ALL/ANY/VOTE、顺序/并行）、消息等待与定时等待（duration/date/cycle）、内置业务 JSON 流程模板、JSON 查看/导入/转换、生成 BPMN XML、前端流程检查及版本化设计稿导入导出。
+- 业务工作流设计器（/workflow-designer）：独立的 Vue Flow workspace 组件，编辑业务 WorkflowModel v1，支持稳定的自上而下初始/手动 ELK 自动布局、按人工与服务/流程事件/流程控制分组的节点库、节点库与属性面板独立折叠、拖动时实时跟随的正交连线、撤销重做、所有内置节点的可选 bizType 业务标识与 bizJson 业务数据字符串（含子流程片段）、多人审批（顺序、提醒、ALL/ANY/VOTE）、服务节点多服务会签（ALL/ANY/VOTE、顺序/并行）、消息等待与定时等待（duration/date/cycle）、内置业务 JSON 流程模板、JSON 查看/导入/转换、生成 BPMN XML、前端流程检查及版本化设计稿导入导出。
 - 官方 BPMN/Camunda 属性面板：编辑流程、节点和连线字段；支持 Camunda 办理人/候选用户/候选组/表单、多实例及服务任务执行配置。人工任务可应用“人工审批”Element Template，以业务字段为主并折叠显示高级设置。
 - 六个常用审批模板，以及带元素定位的基础连接、名单和一层并行结构检查；检查错误会阻止文件导出。
 - Camunda 7 引擎联调页：通过 Vite 开发代理部署 BPMN、查询流程定义、启动实例、查询/领取/完成人工任务和查看活动树。
 - Camunda REST 管理台：`/camunda-console` 提供运行总览、部署与定义查询、定义/实例挂起恢复、实例终止、活动树与变量查看、任务与 External Task 查询、Job/Incident 异常查看、历史查询、JSON 导出和 Camunda 用户操作日志；页面直接调用官方 REST，仅用于开发联调。
 - 流程验证工作台：在 `/camunda-validation` 选择串行审批或金额分支审批，自动部署唯一测试版本、启动并完成人工任务、核对历史和断言；默认级联清理测试部署，可按需保留数据。
 - 后端业务流程页：`/workflow-business` 通过 `/api/v1` 浏览任务模板、查看当前模板详情和流程图、删除模板、启动业务任务实例、查询和完成人工任务，并支持将任务退回待重派或重派给指定办理人；开发模式可用 Camunda 状态核对业务返回。
+  - 模板暂停状态由 `suspended` 控制；当前接口省略 `startable` 时按可发起处理，兼容旧接口明确返回 `startable: false` 时禁止发起。启动仍需填写业务键并通过相应入口的参数校验。
 - 业务流程页按节点类型和阶段生成启动/办理字段，同时保留全局 variables JSON 调试入口。用户可分别选择旧接口的 variables 方式或新接口的按节点映射方式：启动调用 start 或 start_biz，完成当前人工任务调用 complete 或 complete_biz。新方式将节点 ID、类型及字段值放入 nodes，由后端拼接全局变量名；启动时 nodes 与 variables 同名字段以 nodes 为准，完成时只提交当前任务节点。消息等待与定时等待的未固定参数仍使用后端约定的 `{nodeId}_messageName` 和必填 `{nodeId}_timerValue`。
   - Vue 工作流设计器通过宿主编译回调调用 /api/v1/bpmn/json2xml 生成 BPMN XML；“发布任务模板”使用现有 /api/v1/template 业务接口，显示模板版本与部署/流程定义标识。内置流程模板包含后端已部署的 `msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae`（固定消息名 `msg_wait_name`）和 `timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae`（固定等待时长 `PT1M`）。部署时引擎后端从编译产物推导全局变量 params_rules，声明流程进行到某一节点时需要的传参；业务 JSON、params_rules 与启动传参的完整对照示例见 [立项申请示例](./packages/workflow-designer/docs/examples/立项申请/立项申请.js)。它不直接部署到 Camunda 引擎，仍与 /designer 的 BPMN/XML 编辑器和引擎验证发布能力区分。新增的[子流程片段库](./src/views/SubProcessLibraryView.vue)提供片段的独立管理、局部流程编辑和 CRUD；主流程中的嵌入式子流程节点将 `process` 快照随业务模型提交后端编译，管理入口在新标签页打开以保留主流程草稿。
 - 业务表单（/forms）：官方 form-js 草稿设计与预览、版本发布、历史与回滚、停启用和删除；审批/多人审批节点绑定固定版本 bizFormKey，任务办理按当前定义回填、校验并提交原字段 key。操作与实际验收见 [业务人工任务表单](docs/business-forms.md)。

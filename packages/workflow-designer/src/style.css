@@ -105,6 +105,7 @@
 .wfd-tone-receive { color: #327b91; background: #eaf5f8; }
 .wfd-tone-timer { color: #745ca7; background: #f1eef9; }
 .wfd-tone-condition { color: #ae7641; background: #fbf3e9; }
+.wfd-tone-parallel { color: #446d9a; background: #edf3fb; }
 .wfd-tone-subProcess { color: #5b7793; background: #edf3f8; }
 .wfd-tone-end { color: #687a72; background: #edf1ef; }
 .wfd-plus { color: #a0aca6; transition: color .16s ease, transform .16s ease; }
@@ -160,6 +161,7 @@
 .wfd-node-receive { border-left-color: #4e9aab; }
 .wfd-node-timer { border-left-color: #806bb5; }
 .wfd-node-condition { border-left-color: #ce9554; }
+.wfd-node-parallel { border-left-color: #668dba; }
 .wfd-node-end { border-left-color: #84968d; }
 .wfd-node-unknown { border-left-color: var(--wfd-danger); background: #fffafa; }
 .wfd-node-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 7px; color: #54746a; background: #eef4f1; }

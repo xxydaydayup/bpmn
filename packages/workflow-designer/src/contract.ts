@@ -1,6 +1,7 @@
 import type { WorkflowDesignDocument, WorkflowEditorState, WorkflowInput, WorkflowModel, WorkflowValidationIssue } from './types'
 import { getWorkflowNodeDefinition, isWorkflowNodeType } from './nodes'
 import { workflowProtocolIssues } from './protocol-validation'
+import { parallelStructureIssues } from './parallel-validation'
 export { WORKFLOW_NODE_TYPES } from './nodes'
 
 
@@ -145,7 +146,7 @@ export function workflowIssues(model: WorkflowModel, extra: WorkflowValidationIs
 }
 
 export function workflowEditorNodeIssues(model: WorkflowModel): WorkflowValidationIssue[] {
-  const issues: WorkflowValidationIssue[] = []
+  const issues: WorkflowValidationIssue[] = [...parallelStructureIssues(model)]
   const pending = [{ nodes: model.nodes, flows: model.flows, owner: undefined as string | undefined }]
   const seen = new Set<object>()
   while (pending.length) {

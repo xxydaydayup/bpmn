@@ -1,4 +1,5 @@
 export { businessWorkflowGateway, createBusinessWorkflowGateway } from './gateway'
+export { workflowClient, workflowRequest } from './client'
 export { subProcessLibraryGateway, createSubProcessLibraryGateway } from './subProcessGateway'
 export { toBpmnCompilerJson } from './subProcessGateway'
 export type { SubProcessLibraryGateway } from './subProcessGateway'

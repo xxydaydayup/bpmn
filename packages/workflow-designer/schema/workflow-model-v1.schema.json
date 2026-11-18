@@ -116,6 +116,9 @@
         "bizType": {
           "type": "string"
         },
+        "bizJson": {
+          "type": "string"
+        },
         "form": {
           "type": "string"
         },

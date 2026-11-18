@@ -160,4 +160,28 @@ export const workflowTemplates: WorkflowTemplate[] = [
       ]),
     },
   },
+  {
+    id: 'parallel-approval',
+    name: '并行审批',
+    description: '提交后财务与法务独立办理，全部完成后汇合并归档。多个环节并行；汇合不代表全部同意。',
+    model: {
+      processId: 'parallel-approval', processName: '并行审批',
+      nodes: nodes([
+        { id: 'start', type: 'start', name: '开始', x: 320, y: 40 },
+        { id: 'apply', type: 'approval', name: '提交申请', x: 320, y: 150 },
+        { id: 'split', type: 'parallel', name: '并行分流', x: 320, y: 260 },
+        { id: 'finance', type: 'approval', name: '财务审批', x: 180, y: 370 },
+        { id: 'legal', type: 'approval', name: '法务审批', x: 460, y: 370 },
+        { id: 'join', type: 'parallel', name: '并行汇合', x: 320, y: 480 },
+        { id: 'archive', type: 'approval', name: '归档', x: 320, y: 590 },
+        { id: 'end', type: 'end', name: '结束', x: 320, y: 700 },
+      ]),
+      flows: flows([
+        { source: 'start', target: 'apply' }, { source: 'apply', target: 'split' },
+        { source: 'split', target: 'finance' }, { source: 'split', target: 'legal' },
+        { source: 'finance', target: 'join' }, { source: 'legal', target: 'join' },
+        { source: 'join', target: 'archive' }, { source: 'archive', target: 'end' },
+      ]),
+    },
+  },
 ]

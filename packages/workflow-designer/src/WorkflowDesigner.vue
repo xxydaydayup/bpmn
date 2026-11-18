@@ -88,13 +88,28 @@ const setViewport = flow.setViewport
 const screenToFlowCoordinate = flow.screenToFlowCoordinate
 const selectedNode = computed(() => nodes.value.find((node: DesignerNode) => node.id === activeNodeId.value))
 const selectedEdge = computed(() => edges.value.find((edge: DesignerEdge) => edge.id === activeEdgeId.value))
+const parallelOutgoing = computed(() => model.value.nodes.find(node => node.id === selectedEdge.value?.source)?.type === 'parallel')
+const hasParallelConditions = computed(() => parallelOutgoing.value && selectedEdge.value
+  && ('branch' in selectedEdge.value.data.original || 'conditionExpression' in selectedEdge.value.data.original))
+const parallelExplanation = computed(() => {
+  const id = selectedNode.value?.id
+  const incoming = model.value.flows.filter(flow => flow.target === id).length
+  const outgoing = model.value.flows.filter(flow => flow.source === id).length
+  const role = incoming > 1 && outgoing > 1 ? '先等待全部入线到齐，再激活全部出线。'
+    : incoming > 1 ? '汇合：等待全部入线到齐后继续。'
+    : outgoing > 1 ? '分流：同时激活全部出线。' : '连接多个入线或出线后产生汇合或分流效果。'
+  return `${incoming} 条入线 · ${outgoing} 条出线。${role}网关不创建待办，汇合表示分支完成，不代表全部审批通过。`
+})
 const reminderTargetNodes = computed(() => model.value.nodes.filter(node => {
   const type = getWorkflowNodeDefinition(node.type)?.type
   return node.id !== selectedNode.value?.id && type && ['approval', 'countersign', 'service', 'subProcess'].includes(type)
 }))
 const readonlyMode = computed(() => props.readonly || originalReadonly.value)
 const model = computed(() => fromCanvas(nodes.value, edges.value, baseModel()))
-const allIssues = computed<WorkflowValidationIssue[]>(() => [...issues.value, ...unknownPaths.value.map(path => ({ code: 'unknown-business-data', message: '发现未识别的业务数据（' + path + '），保留原文但禁止编译。' }))])
+const allIssues = computed<WorkflowValidationIssue[]>(() => [...issues.value.map(issue => {
+  const index = issue.edgeId?.startsWith('flow-') ? Number(issue.edgeId.slice(5)) : NaN
+  return !Number.isInteger(index) ? issue : { ...issue, edgeId: edges.value[index]?.id ?? issue.edgeId }
+}), ...unknownPaths.value.map(path => ({ code: 'unknown-business-data', message: '发现未识别的业务数据（' + path + '），保留原文但禁止编译。' }))])
 const canCompile = computed(() => Boolean(props.compile) && !readonlyMode.value && !allIssues.value.some(issue => issue.severity !== 'warning') && compileState.value !== 'loading')
 const canDeploy = computed(() => Boolean(props.deploy) && canCompile.value && deployState.value !== 'loading')
 const deploySummary = computed(() => {
@@ -332,9 +347,50 @@ function commitTextInput(event: Event, commit: (value: string) => void) {
 }
 function updateEdge(id: string, key: 'branch' | 'conditionExpression' | 'source' | 'target', value: string) {
   if (readonlyMode.value) return; const edge = edges.value.find(item => item.id === id); if (!edge) return
-  edges.value = edges.value.map(item => item.id !== id ? item : key === 'source' || key === 'target'
-    ? { ...item, [key]: value, data: { ...item.data, routePoints: undefined, feedback: undefined } }
-    : { ...item, data: { ...item.data, [key]: value || undefined } })
+  if (key === 'branch' || key === 'conditionExpression') {
+    if (model.value.nodes.find(node => node.id === edge.source)?.type === 'parallel') return
+  } else {
+    const sourceId = key === 'source' ? value : edge.source
+    const targetId = key === 'target' ? value : edge.target
+    if (!connectionAllowed(sourceId, targetId, edges.value.indexOf(edge))) {
+      viewError.value = '无法连接这些节点：请检查重复连线、起止方向及节点连接限制。'
+      return
+    }
+  }
+  viewError.value = ''
+  edges.value = edges.value.map(item => {
+    if (item.id !== id) return item
+    if (key === 'source' || key === 'target') return { ...item, [key]: value, data: { ...item.data, routePoints: undefined, feedback: undefined } }
+    const original = { ...item.data.original }
+    if (value === '') delete original[key]
+    else original[key] = value
+    return { ...item, data: { ...item.data, [key]: value || undefined, original } }
+  })
+  updateDocument()
+}
+function connectionAllowed(sourceId: string, targetId: string, editingFlowIndex?: number) {
+  const value = model.value
+  const source = value.nodes.find(node => node.id === sourceId)
+  const target = value.nodes.find(node => node.id === targetId)
+  return Boolean(source && target && canConnectNodes(source, target, value, editingFlowIndex)
+    && (props.extensions?.canConnect?.(source, target, { ...value, flows: value.flows.filter((_, index) => index !== editingFlowIndex) }) ?? true))
+}
+function clearParallelConditions() {
+  const edge = selectedEdge.value
+  if (readonlyMode.value || !edge || !hasParallelConditions.value) return
+  const { branch: _branch, conditionExpression: _expression, ...original } = edge.data.original
+  edges.value = edges.value.map(item => item.id === edge.id
+    ? { ...item, label: undefined, class: undefined, data: { ...item.data, branch: undefined, conditionExpression: undefined, original } }
+    : item)
+  updateDocument()
+}
+function onEdgeUpdate(event: { edge: { id: string }; connection: Connection }) {
+  if (readonlyMode.value) return
+  const index = edges.value.findIndex(edge => edge.id === event.edge.id)
+  const { source, target } = event.connection
+  if (index < 0 || !source || !target || !connectionAllowed(source, target, index)) return
+  edges.value = edges.value.map((edge, i) => i === index
+    ? { ...edge, source, target, data: { ...edge.data, routePoints: undefined, feedback: undefined } } : edge)
   updateDocument()
 }
 function addNode(type: WorkflowNodeType, position?: { x: number; y: number }) {
@@ -362,11 +418,10 @@ function removeSelection() {
 }
 function handleConnect(connection: Connection) {
   if (readonlyMode.value || !connection.source || !connection.target) return
-  const source = model.value.nodes.find(node => node.id === connection.source); const target = model.value.nodes.find(node => node.id === connection.target)
-  if (!source || !target || !(props.extensions?.canConnect?.(source, target, model.value) ?? canConnectNodes(source, target, model.value))) return
+  if (!connectionAllowed(connection.source, connection.target)) return
   pushHistory()
-  const id = 'flow-' + Date.now().toString(36)
-  edges.value = [...edges.value, { id, source: source.id, target: target.id, type: 'workflowRoute', data: { original: { source: source.id, target: target.id } }, markerEnd: 'arrowclosed' } as DesignerEdge]
+  const id = createWorkflowNodeId('flow', edges.value.map(edge => edge.id))
+  edges.value = [...edges.value, { id, source: connection.source, target: connection.target, type: 'workflowRoute', data: { original: { source: connection.source, target: connection.target } }, markerEnd: 'arrowclosed' } as DesignerEdge]
   activeNodeId.value = undefined; activeEdgeId.value = id; updateDocument()
 }
 function onNodeClick(event: NodeMouseEvent) { activeNodeId.value = event.node.id; activeEdgeId.value = undefined }
@@ -513,7 +568,7 @@ function validateFragmentModel(value: WorkflowModel): WorkflowValidationIssue[] 
   if (value.nodes.length === 0) result.push({ code: 'fragment-empty', message: '片段至少需要一个节点。' })
   for (const node of value.nodes) {
     if (!node.name.trim()) result.push({ code: 'fragment-node-name', message: '请填写节点名称。', nodeId: node.id })
-    if (!['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'].includes(node.type)) result.push({ code: 'fragment-node-type', message: `子流程片段不支持“${node.type}”节点。`, nodeId: node.id })
+    if (!getWorkflowNodeDefinition(node.type)) result.push({ code: 'fragment-node-type', message: `子流程片段不支持“${node.type}”节点。`, nodeId: node.id })
   }
   for (const [index, flow] of value.flows.entries()) {
     if (flow.source === flow.target) result.push({ code: 'fragment-self-link', message: '节点不能连接到自身。', edgeId: `flow-${index}` })
@@ -596,7 +651,7 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument, validate: (
         <input ref="fileInput" class="wfd-visually-hidden" type="file" accept="application/json,.json" @change="onFileSelected">
       </div>
     </header>
-    <div v-if="templateOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="templateOpen = false"><section class="wfd-dialog wfd-dialog-template" role="dialog" aria-modal="true" aria-labelledby="wfd-template-title"><header><div><h2 id="wfd-template-title">流程模板</h2><p>使用模板会替换当前业务流程，可通过撤销恢复；模型由 WorkflowModel JSON 描述。</p></div><button type="button" aria-label="关闭" @click="templateOpen = false">×</button></header><div class="wfd-template-options" role="radiogroup" aria-label="选择流程模板"><label v-for="item in workflowTemplates" :key="item.id" class="wfd-template-option" :class="{ 'is-selected': selectedTemplateId === item.id }"><input v-model="selectedTemplateId" type="radio" name="workflow-template" :value="item.id"><span class="wfd-template-icon" :class="'wfd-tone-' + item.model.nodes[1]?.type" aria-hidden="true" v-html="templateIcons[item.model.nodes[1]?.type === 'countersign' ? 'plus' : item.model.nodes[1]?.type === 'service' ? 'service' : item.model.nodes.some(node => node.type === 'condition') ? 'branch' : 'user']"></span><span class="wfd-template-copy"><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span><span class="wfd-template-mark" aria-hidden="true">{{ selectedTemplateId === item.id ? '✓' : '' }}</span></label></div><div class="wfd-template-preview"><div><span>流程标识</span><code>{{ selectedTemplate.model.processId }}</code></div><div><span>节点 / 连线</span><code>{{ selectedTemplate.model.nodes.length }} / {{ selectedTemplate.model.flows.length }}</code></div><div><span>多人审批</span><code>{{ selectedTemplate.model.nodes.find(node => node.type === 'countersign')?.approveMode ?? '—' }}</code></div><div v-if="selectedTemplate.sourceProcessDefinitionId"><span>来源流程定义</span><code>{{ selectedTemplate.sourceProcessDefinitionId }}</code></div></div><footer><button class="wfd-button" type="button" @click="templateOpen = false">取消</button><button class="wfd-button" type="button" @click="jsonDraft = safeJson(selectedTemplate.model); jsonImportOpen = true; templateOpen = false">查看 JSON</button><button class="wfd-button wfd-button-primary" type="button" :disabled="readonlyMode" @click="applyTemplate">使用模板</button></footer></section></div>
+    <div v-if="templateOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="templateOpen = false"><section class="wfd-dialog wfd-dialog-template" role="dialog" aria-modal="true" aria-labelledby="wfd-template-title"><header><div><h2 id="wfd-template-title">流程模板</h2><p>使用模板会替换当前业务流程，可通过撤销恢复；模型由 WorkflowModel JSON 描述。</p></div><button type="button" aria-label="关闭" @click="templateOpen = false">×</button></header><div class="wfd-template-options" role="radiogroup" aria-label="选择流程模板"><label v-for="item in workflowTemplates" :key="item.id" class="wfd-template-option" :class="{ 'is-selected': selectedTemplateId === item.id }"><input v-model="selectedTemplateId" type="radio" name="workflow-template" :value="item.id"><span class="wfd-template-icon" :class="'wfd-tone-' + item.model.nodes[1]?.type" aria-hidden="true" v-html="templateIcons[item.model.nodes[1]?.type === 'countersign' ? 'plus' : item.model.nodes[1]?.type === 'service' ? 'service' : item.model.nodes.some(node => node.type === 'parallel') ? 'plus' : item.model.nodes.some(node => node.type === 'condition') ? 'branch' : 'user']"></span><span class="wfd-template-copy"><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span><span class="wfd-template-mark" aria-hidden="true">{{ selectedTemplateId === item.id ? '✓' : '' }}</span></label></div><div class="wfd-template-preview"><div><span>流程标识</span><code>{{ selectedTemplate.model.processId }}</code></div><div><span>节点 / 连线</span><code>{{ selectedTemplate.model.nodes.length }} / {{ selectedTemplate.model.flows.length }}</code></div><div><span>多人审批</span><code>{{ selectedTemplate.model.nodes.find(node => node.type === 'countersign')?.approveMode ?? '—' }}</code></div><div v-if="selectedTemplate.sourceProcessDefinitionId"><span>来源流程定义</span><code>{{ selectedTemplate.sourceProcessDefinitionId }}</code></div></div><footer><button class="wfd-button" type="button" @click="templateOpen = false">取消</button><button class="wfd-button" type="button" @click="jsonDraft = safeJson(selectedTemplate.model); jsonImportOpen = true; templateOpen = false">查看 JSON</button><button class="wfd-button wfd-button-primary" type="button" :disabled="readonlyMode" @click="applyTemplate">使用模板</button></footer></section></div>
     <div v-if="jsonViewOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="jsonViewOpen = false"><section class="wfd-dialog" role="dialog" aria-modal="true" aria-labelledby="wfd-json-title"><header><div><h2 id="wfd-json-title">业务模型 JSON</h2><p>当前业务模型；设计稿视口与主题保存在独立信封中。</p></div><button type="button" aria-label="关闭" @click="jsonViewOpen = false">×</button></header><textarea :value="safeJson(model)" readonly aria-label="业务模型 JSON" spellcheck="false"></textarea><footer><button class="wfd-button" type="button" @click="copyText(safeJson(model), 'JSON ')">复制 JSON</button><button class="wfd-button" type="button" @click="downloadJson">下载 JSON</button><button class="wfd-button wfd-button-primary" type="button" @click="jsonViewOpen = false">完成</button></footer></section></div>
     <div v-if="jsonImportOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="jsonImportOpen = false"><section class="wfd-dialog" role="dialog" aria-modal="true" aria-labelledby="wfd-import-title"><header><div><h2 id="wfd-import-title">导入 / 转换业务 JSON</h2><p>粘贴 WorkflowModel v1 或版本化设计稿。导入后可继续编辑，或请求后端转换成 BPMN XML。</p></div><button type="button" aria-label="关闭" @click="jsonImportOpen = false">×</button></header><div class="wfd-dialog-file-row"><span>也可以从文件导入</span><button class="wfd-button" type="button" :disabled="compileState === 'loading'" @click="importFile">选择 JSON 文件</button></div><textarea v-model="jsonDraft" aria-label="业务 JSON" spellcheck="false" :disabled="compileState === 'loading'"></textarea><p v-if="jsonError" class="wfd-dialog-error" role="alert">{{ jsonError }}</p><footer><button class="wfd-button" type="button" @click="jsonImportOpen = false">取消</button><button class="wfd-button" type="button" :disabled="readonlyMode || compileState === 'loading'" @click="importJsonToCanvas">导入到画布</button><button class="wfd-button wfd-button-primary" type="button" :disabled="compileState === 'loading' || !props.compile" @click="convertJsonToXml">{{ compileState === 'loading' ? '转换中…' : '转换为 BPMN XML' }}</button></footer></section></div>
     <div v-if="xmlOpen" class="wfd-dialog-backdrop" role="presentation" @click.self="xmlOpen = false"><section class="wfd-dialog" role="dialog" aria-modal="true" aria-labelledby="wfd-xml-title"><header><div><h2 id="wfd-xml-title">BPMN XML</h2><p>由后端根据当前业务模型生成。</p></div><button type="button" aria-label="关闭" @click="xmlOpen = false">×</button></header><textarea v-model="xmlText" readonly aria-label="BPMN XML" spellcheck="false"></textarea><footer><button class="wfd-button" type="button" @click="copyText(xmlText, 'BPMN XML ')">复制 XML</button><button class="wfd-button" type="button" @click="downloadXml">下载 XML</button><button class="wfd-button wfd-button-primary" type="button" @click="xmlOpen = false">完成</button></footer></section></div>
@@ -621,7 +676,7 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument, validate: (
           </div>
         </div>
         <div class="wfd-canvas-stage">
-          <VueFlow :id="flowId" v-model:nodes="nodes" v-model:edges="edges" class="wfd-flow" :node-types="nodeTypesMap" :edge-types="edgeTypesMap" :nodes-draggable="!readonlyMode" :nodes-connectable="!readonlyMode" :edges-updatable="!readonlyMode" :elements-selectable="true" :fit-view-on-init="!shouldAutoLayoutOnInit && !editorState.viewport" :min-zoom="0.2" :max-zoom="2.2" @init="handleFlowInit" @nodes-initialized="handleNodesInitialized" @connect="handleConnect" @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-start="onDragStart" @node-drag-stop="onDragStop" @move-end="onViewportChange">
+          <VueFlow :id="flowId" v-model:nodes="nodes" v-model:edges="edges" class="wfd-flow" :node-types="nodeTypesMap" :edge-types="edgeTypesMap" :nodes-draggable="!readonlyMode" :nodes-connectable="!readonlyMode" :edges-updatable="!readonlyMode" :elements-selectable="true" :fit-view-on-init="!shouldAutoLayoutOnInit && !editorState.viewport" :min-zoom="0.2" :max-zoom="2.2" @init="handleFlowInit" @nodes-initialized="handleNodesInitialized" @connect="handleConnect" @edge-update="onEdgeUpdate" @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-start="onDragStart" @node-drag-stop="onDragStop" @move-end="onViewportChange">
           </VueFlow>
           <div class="wfd-canvas-caption" aria-hidden="true"><span class="wfd-canvas-caption-mark" /><strong>流程画布</strong><small>选择节点编辑属性，拖动连接点建立流转</small></div>
           <div v-if="!nodes.length" class="wfd-empty-canvas"><strong>从一个节点开始</strong><span>使用左侧节点库添加步骤，再拖动节点间的连接点。</span></div>
@@ -635,14 +690,19 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument, validate: (
           <template v-else-if="nodeTypes.some(item => item.type === selectedNode?.data.kind)">
             <label class="wfd-field"><span>节点名称</span><input :value="selectedNode.data.name" :disabled="readonlyMode" @focus="pushHistory" @change="commitTextInput($event, value => updateNode(selectedNode!.id, 'name', value))"></label>
             <label class="wfd-field"><span>节点标识</span><input :value="selectedNode.id" disabled></label>
+            <p v-if="selectedNode.data.kind === 'parallel'" class="wfd-field-note" role="status">{{ parallelExplanation }}</p>
             <label v-if="props.mode !== 'subprocess-fragment'" class="wfd-field"><span>业务标识（bizType）</span><input :value="String(getRecord(selectedNode.id)?.bizType ?? '')" :disabled="readonlyMode" placeholder="可选，供宿主业务系统识别" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'bizType', ($event.target as HTMLInputElement).value)"></label>
+            <label class="wfd-field"><span>业务数据（bizJson）</span><textarea :value="getRecord(selectedNode.id)?.bizJson ?? ''" :disabled="readonlyMode" :aria-describedby="flowId + '-bizjson-hint'" rows="4" @focus="pushHistory" @change="updateNode(selectedNode!.id, 'bizJson', ($event.target as HTMLTextAreaElement).value)" /></label>
+            <p :id="flowId + '-bizjson-hint'" class="wfd-field-note">可选，业务自定义数据字符串；作为模板默认值，可由实例变量覆盖。</p>
           <component v-if="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :is="getWorkflowNodeDefinition(selectedNode.data.kind)?.propertyEditor" :model="getRecord(selectedNode.id)" :readonly="readonlyMode" :reminder-targets="reminderTargetNodes" :subprocess-fragments="props.extensions?.subprocessFragments" :business-forms="props.extensions?.businessForms" :begin-edit="pushHistory" :update="(key: string, value: unknown) => updateNode(selectedNode!.id, key, value)" />
           </template><p v-else class="wfd-readonly-note">此版本无法编辑该节点。原始节点数据将在导出中保留，且不能编译。</p>
           <p class="wfd-coordinate">画布位置 <code>{{ Math.round(selectedNode.position.x) }}, {{ Math.round(selectedNode.position.y) }}</code></p>
         </template>
         <template v-else-if="selectedEdge"><div class="wfd-selected-kind"><span class="wfd-edge-symbol" aria-hidden="true">↗</span><span><strong>顺序流</strong><small>{{ getRecord(selectedEdge.source)?.name ?? selectedEdge.source }} → {{ getRecord(selectedEdge.target)?.name ?? selectedEdge.target }}</small></span></div>
-          <label class="wfd-field"><span>分支语义</span><select :value="String(selectedEdge.data?.branch ?? '')" :disabled="readonlyMode" @focus="pushHistory" @change="updateEdge(selectedEdge!.id, 'branch', ($event.target as HTMLSelectElement).value)"><option value="">普通流转</option><option value="pass">通过</option><option value="reject">驳回</option></select></label>
-          <label class="wfd-field"><span>条件表达式</span><textarea :value="String(selectedEdge.data?.conditionExpression ?? '')" :disabled="readonlyMode" rows="3" placeholder="例如：amount > 5000" @focus="pushHistory" @change="updateEdge(selectedEdge!.id, 'conditionExpression', ($event.target as HTMLTextAreaElement).value)" /></label>
+          <p v-if="parallelOutgoing" class="wfd-field-note">全部分支执行：并行网关的出线不能设置分支语义或条件表达式。</p>
+          <div v-if="hasParallelConditions" class="wfd-field-note" role="alert"><p>这条并行出线包含已有条件。请显式清除后再编译；原值保留在下方。</p><button class="wfd-button" type="button" :disabled="readonlyMode" @click="clearParallelConditions">清除并行出线条件</button><pre>{{ JSON.stringify({ branch: selectedEdge.data.original.branch, conditionExpression: selectedEdge.data.original.conditionExpression }, null, 2) }}</pre></div>
+          <label class="wfd-field"><span>分支语义</span><select :value="String(selectedEdge.data?.branch ?? '')" :disabled="readonlyMode || parallelOutgoing" @focus="pushHistory" @change="updateEdge(selectedEdge!.id, 'branch', ($event.target as HTMLSelectElement).value)"><option value="">普通流转</option><option value="pass">通过</option><option value="reject">驳回</option></select></label>
+          <label class="wfd-field"><span>条件表达式</span><textarea :value="String(selectedEdge.data?.conditionExpression ?? '')" :disabled="readonlyMode || parallelOutgoing" rows="3" placeholder="例如：amount > 5000" @focus="pushHistory" @change="updateEdge(selectedEdge!.id, 'conditionExpression', ($event.target as HTMLTextAreaElement).value)" /></label>
           <label class="wfd-field"><span>起点</span><select :value="selectedEdge.source" :disabled="readonlyMode" @focus="pushHistory" @change="updateEdge(selectedEdge!.id, 'source', ($event.target as HTMLSelectElement).value)"><option v-for="node in model.nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
           <label class="wfd-field"><span>终点</span><select :value="selectedEdge.target" :disabled="readonlyMode" @focus="pushHistory" @change="updateEdge(selectedEdge!.id, 'target', ($event.target as HTMLSelectElement).value)"><option v-for="node in model.nodes" :key="node.id" :value="node.id">{{ node.name }}</option></select></label>
         </template>

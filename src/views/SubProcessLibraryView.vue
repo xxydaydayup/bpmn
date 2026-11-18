@@ -30,8 +30,8 @@ const fragmentName = ref('')
 const fragmentDescription = ref('')
 const design = shallowRef<WorkflowInput>()
 const blankModel = (): WorkflowModel => ({ processId: 'fragment', processName: '新建片段', nodes: [createNodeRecord('approval', 'approval_initial', 300, 180)], flows: [] })
-const editorRef = ref<{ exportDesign: () => WorkflowDesignDocument | Record<string, unknown>; validate: () => { code: string; message: string }[]; check: () => void }>()
-const editorExtensions = { nodeTypes: ['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'] as const, subprocessFragments: subProcessLibraryGateway }
+const editorRef = ref<{ exportDesign: () => WorkflowDesignDocument | Record<string, unknown>; validate: () => { code: string; message: string; severity?: 'error' | 'warning' }[]; check: () => void }>()
+const editorExtensions = { nodeTypes: ['start', 'approval', 'countersign', 'condition', 'parallel', 'service', 'receive', 'timer', 'subProcess', 'end'] as const, subprocessFragments: subProcessLibraryGateway }
 const canvasStyle = computed(() => diagramCSSVariables())
 const columns = computed<DataTableColumn<WorkflowSubProcessFragment>[]>(() => [
   { key: 'name', prop: 'name', label: '片段名称', minWidth: 220 },
@@ -146,7 +146,7 @@ async function loadEditor() {
 async function save() {
   if (saving.value || !design.value) return
   const issues = editorRef.value?.validate() ?? [{ code: 'editor-loading', message: '片段编辑器还没有准备好。' }]
-  if (issues.length) {
+  if (issues.some(issue => issue.severity !== 'warning')) {
     editorRef.value?.check()
     ElMessage.warning('请先修复片段中的结构问题。')
     return

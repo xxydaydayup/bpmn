@@ -4,7 +4,9 @@ import { useRouter } from 'vue-router'
 import { WorkflowDesigner, type WorkflowDesignDocument, type WorkflowInput, type WorkflowModel } from '@workflow/designer'
 import '@workflow/designer/style.css'
 import fixture from '@workflow/designer/fixtures/project-approval.json'
-import { request } from '@/utils/request'
+import { workflowClient } from '@/api/workflow/client'
+import { WorkflowClientError } from '@workflow/sdk/client'
+import { toBpmnCompilerJson as validateCompilerJson } from '@workflow/sdk'
 import { businessWorkflowGateway, subProcessLibraryGateway, toBpmnCompilerJson, type TaskTemplate } from '@/api/workflow'
 import { diagramCSSVariables } from '@/bpmn/theme'
 import '@/styles/designer.css'
@@ -28,6 +30,7 @@ const assertDeploymentResult = (template: TaskTemplate) => {
   }
 }
 const isDeploymentUncertain = (cause: unknown) => {
+  if (cause instanceof WorkflowClientError) return cause.effect !== 'none'
   if (axios.isAxiosError(cause)) {
     const status = cause.response?.status
     return !status || status >= 500 || status === 408
@@ -40,16 +43,10 @@ const isDeploymentUncertain = (cause: unknown) => {
 }
 const deploy = async (model: WorkflowModel) => {
   deploymentNotice.value = ''
-  const xml = await compile(model)
-  const bpmnXml = xml.bpmnXml
+  await validateFormBindings(model)
   try {
-    const result = await businessWorkflowGateway.publishTemplate(bpmnXml, model.processName, {
-      templateKey: model.processId,
-      templateName: model.processName,
-      startable: true,
-      suspended: false,
-      displayJson: model,
-    })
+    const published = await workflowClient.publish(validateCompilerJson(toBpmnCompilerJson(model)))
+    const result = { ...published, taskKey: published.templateKey, taskName: published.templateName, version: published.templateVersion } as unknown as TaskTemplate
     assertDeploymentResult(result)
     deployment.value = result
     deployedModel.value = JSON.stringify(model)
@@ -78,10 +75,7 @@ const isDeployedCurrentModel = computed(() => Boolean(deployment.value && deploy
 const compile = async (model: WorkflowModel) => {
   compileNotice.value = ''
   await validateFormBindings(model)
-  const response = await request<{ code: string; data?: { bpmnXml?: string }; message?: string }>({ method: 'POST', url: '/v1/bpmn/json2xml', data: toBpmnCompilerJson(model) })
-  const bpmnXml = response?.data?.bpmnXml
-  if (response?.code !== 'OK') throw new Error(response?.message || '后端编译失败')
-  if (!bpmnXml?.trim()) throw new Error('编译接口未返回 BPMN XML')
+  const { bpmnXml } = await workflowClient.compile(validateCompilerJson(toBpmnCompilerJson(model)))
   compileNotice.value = '后端已返回 BPMN XML（' + bpmnXml.length + ' 个字符）；可查看、下载 XML，或发布为业务任务模板。'
   return { bpmnXml }
 }
@@ -92,7 +86,7 @@ const compile = async (model: WorkflowModel) => {
     <header class="designer-document-header">
       <div class="designer-document-title"><div class="designer-breadcrumb">工作空间 <span>/</span> 业务流程设计</div><div class="designer-title-line"><h1>{{ currentModel.processName || '未命名流程' }}</h1><span class="designer-draft">业务模型 · {{ currentModel.nodes.length }} 个节点</span></div></div>
     </header>
-    <WorkflowDesigner v-model="document" :compile="compile" :deploy="deploy" :verify-deployment="verifyDeployment" :extensions="{ subprocessFragments: subProcessLibraryGateway, businessForms: businessFormDataSource, nodeTypes: ['start', 'approval', 'countersign', 'condition', 'service', 'receive', 'timer', 'subProcess', 'end'] }">
+    <WorkflowDesigner v-model="document" :compile="compile" :deploy="deploy" :verify-deployment="verifyDeployment" :extensions="{ subprocessFragments: subProcessLibraryGateway, businessForms: businessFormDataSource, nodeTypes: ['start', 'approval', 'countersign', 'condition', 'parallel', 'service', 'receive', 'timer', 'subProcess', 'end'] }">
       <template #toolbar-end>
         <a class="subprocess-manage-link" :href="router.resolve({ name: 'sub-processes' }).href" target="_blank" rel="noopener noreferrer">管理子流程片段 <span aria-hidden="true">↗</span></a>
       </template>

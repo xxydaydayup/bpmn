@@ -113,14 +113,9 @@ export function fromCanvas(nodes: DesignerNode[], edges: DesignerEdge[], model: 
       ...(edge.data?.original ?? { source: edge.source, target: edge.target }),
       ...(edge.data?.original?.id ? { id: edge.data.original.id } : {}),
       source: edge.source, target: edge.target,
-      ...(edge.data?.branch ? { branch: edge.data.branch as WorkflowFlowRecord['branch'] } : { branch: undefined }),
+      ...(edge.data?.branch !== undefined ? { branch: edge.data.branch as WorkflowFlowRecord['branch'] } : {}),
       ...(edge.data?.conditionExpression !== undefined ? { conditionExpression: edge.data.conditionExpression } : {}),
-    })).map(flow => {
-      const next = { ...flow }
-      if (!next.branch) delete next.branch
-      if (!next.conditionExpression) delete next.conditionExpression
-      return next
-    }),
+    })),
   }
 }
 

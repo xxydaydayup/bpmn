@@ -41,6 +41,8 @@ function normalizeTemplate(value: ApiRecord): TaskTemplate {
     ...value,
     taskKey: value.taskKey ?? value.templateKey,
     taskName: value.taskName ?? value.templateName,
+    // Current APIs use suspended; retain explicit startable=false from older responses.
+    startable: value.startable ?? true,
     ...(Array.isArray(value.globalVariables)
       ? { globalVariables: value.globalVariables.map(item => normalizeTemplateVariable(item as ApiRecord)) }
       : {}),

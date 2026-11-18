@@ -1,6 +1,7 @@
 import { WORKFLOW_NODE_TYPES, type WorkflowNodeType } from './node-types'
 import approvalNode from './approval/default'
 import conditionNode from './condition/default'
+import parallelNode from './parallel/default'
 import countersignNode from './countersign/default'
 import endNode from './end/default'
 import receiveNode from './receive/default'
@@ -19,6 +20,7 @@ export const workflowNodeDefinitions = {
   receive: receiveNode,
   timer: timerNode,
   condition: conditionNode,
+  parallel: parallelNode,
   subProcess: subProcessNode,
   end: endNode,
 } satisfies { [Type in WorkflowNodeType]: RegisteredWorkflowNodeDefinition<Type> }

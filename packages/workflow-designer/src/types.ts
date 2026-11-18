@@ -11,6 +11,7 @@ export type WorkflowNodeRecord = Omit<StandardNode, 'type' | 'name' | 'x' | 'y' 
   x: number
   y: number
   bizType?: string
+  bizJson?: string
   form?: string
   messageName?: string
   timerType?: 'duration' | 'date' | 'cycle'

@@ -23,6 +23,11 @@ http.interceptors.response.use(
 )
 
 export async function request<T>(config: AxiosRequestConfig): Promise<T> {
+  return (await requestWithStatus<T>(config)).body
+}
+
+/** SDK adapters need the actual HTTP status while legacy callers keep body-only responses. */
+export async function requestWithStatus<T = unknown>(config: AxiosRequestConfig): Promise<{ status: number; body: T }> {
   const response = await http.request<T>(config)
-  return response.data
+  return { status: response.status, body: response.data }
 }

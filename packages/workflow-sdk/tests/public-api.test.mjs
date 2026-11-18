@@ -11,6 +11,41 @@ const issues = input => validateWorkflowModel(input).issues
 const has = (input, code, path) => assert.ok(issues(input).some(issue => issue.code === code && issue.severity === 'error' && issue.path === path), JSON.stringify(issues(input)))
 const task = config => ({ processId: 'review', nodes: [{ id: 'review', type: 'approval', ...config }] })
 
+test('bizJson is an optional opaque string on every standard node, including nested nodes', () => {
+  const value = "  非 JSON：中文 \"review\" <tag>&\nreview_bizJson = 保持原文  "
+  for (const type of WORKFLOW_NODE_TYPES) {
+    for (const bizJson of [value, '', '   ']) {
+      const input = task({ type, bizJson, ...(type === 'subProcess' ? { process: { nodes: [{ id: 'inner', type: 'approval', bizJson: value }] } } : {}) })
+      assert.equal(schema(input), true, JSON.stringify(schema.errors))
+      assert.equal(validateWorkflowModel(input).valid, true, JSON.stringify(issues(input)))
+      assert.deepEqual(toBpmnCompilerJson(input), input)
+    }
+  }
+  assert.ok(!Object.hasOwn(toBpmnCompilerJson(task({})).nodes[0], 'bizJson'))
+  const nested = load('nested')
+  nested.nodes[1].bizJson = '容器'
+  nested.nodes[1].process.nodes[2].bizJson = '内层容器'
+  nested.nodes[1].process.nodes[2].process.nodes[1].bizJson = value
+  const before = structuredClone(nested)
+  assert.deepEqual(toBpmnCompilerJson(nested), before)
+  assert.deepEqual(nested, before)
+})
+
+test('invalid bizJson types preserve input and report the exact local scope before compilation', () => {
+  for (const bizJson of [{ key: 'value' }, ['value'], null, 42, false]) {
+    const input = task({ bizJson })
+    const before = structuredClone(input)
+    assert.equal(schema(input), false)
+    has(input, 'field-type', '/nodes/0/bizJson')
+    assert.throws(() => toBpmnCompilerJson(input), WorkflowModelError)
+    assert.deepEqual(input, before)
+    const nested = load('nested')
+    nested.nodes[1].process.nodes[2].process.nodes[1].bizJson = bizJson
+    assert.ok(issues(nested).some(issue => issue.code === 'field-type' && issue.path === '/nodes/1/process/nodes/2/process/nodes/1/bizJson' && JSON.stringify(issue.scope) === JSON.stringify(['left', 'inner'])), JSON.stringify(issues(nested)))
+    assert.throws(() => toBpmnCompilerJson(nested), WorkflowModelError)
+  }
+})
+
 test('shipped examples validate through Schema and the public API; exports are independent copies', () => {
   for (const file of readdirSync(new URL('../examples/', import.meta.url)).filter(name => name.endsWith('.json') && !name.startsWith('invalid-'))) {
     const input = load(file.slice(0, -5)), before = JSON.stringify(input)
@@ -29,12 +64,15 @@ test('shipped examples validate through Schema and the public API; exports are i
 })
 
 test('protocol snapshot and generated Schema remain traceable and do not drift', () => {
-  const snapshotBytes = readFileSync(new URL('../contract/backend-spec-v1.json', import.meta.url))
+  const snapshotBytes = readFileSync(new URL('../' + workflowSdkCompatibility.snapshot, import.meta.url))
   assert.equal(createHash('sha256').update(snapshotBytes).digest('hex'), workflowSdkCompatibility.sha256)
   const backend = JSON.parse(snapshotBytes)
   assert.equal(backend.version, workflowSdkCompatibility.backendSpecVersion)
   assert.deepEqual(backend.node.fields.type.allowed, WORKFLOW_NODE_TYPES)
   assert.deepEqual(Object.keys(backend.node.fields).sort(), Object.keys(workflowModelSchema.$defs.node.properties).sort())
+  const schemaBytes = readFileSync(new URL('../' + workflowSdkCompatibility.jsonSchema.snapshot, import.meta.url))
+  assert.equal(createHash('sha256').update(schemaBytes).digest('hex'), workflowSdkCompatibility.jsonSchema.sha256)
+  assert.equal(JSON.parse(schemaBytes).$defs.nodeBase.properties.bizJson.type, 'string')
   assert.deepEqual(JSON.parse(readFileSync(new URL('../schema/workflow-model-v1.schema.json', import.meta.url))), workflowModelSchema)
   assert.deepEqual(JSON.parse(readFileSync(new URL('../../workflow-designer/schema/workflow-model-v1.schema.json', import.meta.url))), workflowModelSchema)
 })

@@ -82,7 +82,7 @@ test('task template detail and delete follow the Swagger contract', async () => 
       : { data: detail }
   })
 
-  assert.deepEqual(await gateway.getTemplate('leave/approval'), { ...detail, taskKey: 'leave/approval', taskName: '请假审批' })
+  assert.deepEqual(await gateway.getTemplate('leave/approval'), { ...detail, taskKey: 'leave/approval', taskName: '请假审批', startable: true })
   assert.deepEqual(await gateway.deleteTemplate('leave/approval'), { templateKey: 'leave/approval', status: 'deleted', taskKey: 'leave/approval' })
   assert.equal(calls[0].method, 'GET')
   assert.equal(calls[0].url, '/v1/template/leave%2Fapproval')
@@ -121,6 +121,35 @@ test('template listing uses current Swagger path and normalizes backend fields',
   assert.equal(rows[0].taskKey, 'leave')
   assert.equal(rows[0].taskName, '请假审批')
   assert.equal(rows[0].globalVariables[0].defaultValue, 'alice')
+})
+
+test('template responses without startable stay available unless suspended or explicitly disabled', async () => {
+  const code = compiled.replace(
+    /import \{ request \} from ['"]@\/utils\/request['"];?/,
+    'const request = async () => { throw new Error("Unexpected default request"); };',
+  )
+  const { createBusinessWorkflowGateway } = await import(moduleUrl(code))
+  for (const [state, expected] of [
+    [{ suspended: false }, true],
+    [{ suspended: true }, false],
+    [{ startable: false, suspended: false }, false],
+    [{ startable: true, suspended: false }, true],
+    [{ startable: true, suspended: true }, false],
+  ]) {
+    const template = {
+      templateKey: 'parallel_connection', templateName: '并联流程测试',
+      processDefinitionId: 'parallel_connection:1:definition', ...state,
+    }
+    const gateway = createBusinessWorkflowGateway(async config => ({
+      data: config.url === '/v1/template' ? [template] : template,
+    }))
+    const [listed] = await gateway.listTemplates()
+    const detail = await gateway.getTemplate('parallel_connection')
+    for (const result of [listed, detail]) {
+      assert.equal(typeof result.startable, 'boolean')
+      assert.equal(result.startable && !result.suspended, expected, JSON.stringify(state))
+    }
+  }
 })
 
 test('publishing and starting use current Swagger contracts', async () => {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../src/fixtures/project-approval.json'
 import { createDesignDocument, parseWorkflowInput, workflowIssues } from '../src/contract'
-import { createNodeRecord, fromCanvas, toCanvas } from '../src/adapter'
+import { cloneWorkflowModelWithFreshNodeIds, createNodeRecord, fromCanvas, toCanvas } from '../src/adapter'
+import { defineWorkflow, approval, subProcess } from '@workflow/sdk/definition'
 import { validateWorkflowModel } from '../src/validation'
 import type { WorkflowModel } from '../src/types'
 import { WORKFLOW_NODE_TYPES } from '../src/contract'
@@ -10,13 +11,55 @@ import { toWorkflowModelInput, toWorkflowCompilerJson } from '../src/compiler-mo
 const model = fixture as WorkflowModel
 
 describe('WorkflowModel v1 public contract', () => {
-  it('keeps SDK-supported parallel nodes intact but blocks the unsupported canvas capability', () => {
+  it('round-trips raw, function-built and design models while copying IDs without interpreting bizJson', () => {
+    const bizJson = "  中文 \"review\" <&>\nreview_bizJson = 原样  "
+    const functionModel = defineWorkflow({ key: 'nested_data' }, subProcess('outer', subProcess('inner', approval('review', { bizJson }), { bizJson: '内层容器' }), { bizJson: '外层容器' })).toJSON()
+    const rawModel = { ...model, nodes: model.nodes.map(node => node.id === 'apply' ? { ...node, bizJson } : node.id === 'minister' ? { ...node, bizJson: '' } : node) }
+    for (const input of [rawModel, functionModel]) {
+      const parsed = parseWorkflowInput(input)
+      expect(parsed.unknownPaths).toEqual([])
+      const canvas = toCanvas(parsed.model)
+      const roundtrip = fromCanvas(canvas.nodes, canvas.edges, parsed.model)
+      const reimported = parseWorkflowInput(JSON.parse(JSON.stringify(createDesignDocument(roundtrip)))).model
+      expect(toWorkflowCompilerJson(reimported)).toEqual(toWorkflowCompilerJson(parsed.model))
+      const copy = cloneWorkflowModelWithFreshNodeIds(reimported)
+      const compare = (before: WorkflowModel['nodes'], after: WorkflowModel['nodes'], root = true) => {
+        before.forEach((node, index) => {
+          if (root) expect(after[index]!.id).not.toBe(node.id)
+          else expect(after[index]!.id).toBe(node.id)
+          expect(after[index]!.bizJson).toBe(node.bizJson)
+          if (node.process) compare(node.process.nodes, after[index]!.process!.nodes, false)
+        })
+      }
+      compare(reimported.nodes, copy.nodes)
+    }
+  })
+
+  it('keeps explicit empty and whitespace values and reports invalid nested types without dropping input', () => {
+    for (const bizJson of ['', '   ', {}, [], null, 1, true]) {
+      const input = { ...model, nodes: model.nodes.map(node => node.id === 'apply' ? { ...node, type: 'subProcess', bizJson: '外层', process: { nodes: [{ id: 'inner', type: 'subProcess', bizJson: '内层', process: { nodes: [{ id: 'review', type: 'approval', bizJson }], flows: [] } }], flows: [] } } : node) } as unknown as WorkflowModel
+      const parsed = parseWorkflowInput(createDesignDocument(input))
+      const canvas = toCanvas(parsed.model)
+      const roundtrip = fromCanvas(canvas.nodes, canvas.edges, parsed.model)
+      expect(roundtrip.nodes[1]!.process!.nodes[0]!.process!.nodes[0]!.bizJson).toEqual(bizJson)
+      if (typeof bizJson === 'string') expect(() => toWorkflowCompilerJson(roundtrip)).not.toThrow()
+      else {
+        expect(workflowIssues(roundtrip)).toContainEqual(expect.objectContaining({ code: 'field-type', nodeId: 'apply', scope: ['apply', 'inner'], path: '/nodes/1/process/nodes/0/process/nodes/0/bizJson' }))
+        expect(() => toWorkflowCompilerJson(roundtrip)).toThrow()
+      }
+      roundtrip.nodes[1]!.process!.nodes[0]!.process!.nodes[0]!.futureBusinessData = { keep: true }
+      expect(workflowIssues(roundtrip)).toContainEqual(expect.objectContaining({ code: 'unknown-field', nodeId: 'apply', scope: ['apply', 'inner'], path: '/nodes/1/process/nodes/0/process/nodes/0/futureBusinessData' }))
+      expect(() => toWorkflowCompilerJson(roundtrip)).toThrow()
+      expect(roundtrip.nodes[1]!.process!.nodes[0]!.process!.nodes[0]!.futureBusinessData).toEqual({ keep: true })
+    }
+  })
+  it('recognizes parallel while retaining protocol errors on its outgoing conditions', () => {
     const input = { ...model, nodes: model.nodes.map(node => node.id === 'gwMinister' ? { ...node, type: 'parallel' } : node) } as WorkflowModel
     const before = structuredClone(input)
     const parsed = parseWorkflowInput(input)
     expect(parsed.model).toEqual(before)
-    expect(parsed.unknownPaths.some(path => path.includes('type:parallel'))).toBe(true)
-    expect(workflowIssues(parsed.model)).toContainEqual(expect.objectContaining({ code: 'unknown-node', nodeId: 'gwMinister' }))
+    expect(parsed.unknownPaths).toEqual([])
+    expect(workflowIssues(parsed.model)).toContainEqual(expect.objectContaining({ code: 'parallel-outgoing-condition' }))
     expect(input).toEqual(before)
   })
 
@@ -43,7 +86,7 @@ describe('WorkflowModel v1 public contract', () => {
   })
 
   it('derives known runtime node types from the exhaustive built-in definitions', () => {
-    expect(WORKFLOW_NODE_TYPES).toEqual(['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'subProcess', 'end'])
+    expect(WORKFLOW_NODE_TYPES).toEqual(['start', 'approval', 'countersign', 'service', 'receive', 'timer', 'condition', 'parallel', 'subProcess', 'end'])
   })
 
   it('round-trips the real project approval fixture without changing business fields, topology or coordinates', () => {

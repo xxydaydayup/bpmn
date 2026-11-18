@@ -10,6 +10,7 @@ import { layoutWorkflow } from '../src/layout'
 import { workflowTemplates } from '../src/templates'
 import fixture from '../src/fixtures/project-approval.json'
 import type { WorkflowModel } from '../src/types'
+import { toWorkflowCompilerJson } from '../src/compiler-model'
 
 vi.mock('@vue-flow/core', async () => {
   const { defineComponent, h } = await import('vue')
@@ -17,7 +18,7 @@ vi.mock('@vue-flow/core', async () => {
     VueFlow: defineComponent({
       name: 'VueFlowTestHost',
       props: { nodes: { type: Array, default: () => [] }, edges: { type: Array, default: () => [] }, fitViewOnInit: { type: Boolean, default: false } },
-      emits: ['init', 'nodes-initialized', 'node-click', 'edge-click', 'connect', 'move-end', 'node-drag-start', 'node-drag', 'node-drag-stop'],
+      emits: ['init', 'nodes-initialized', 'node-click', 'edge-click', 'connect', 'edge-update', 'move-end', 'node-drag-start', 'node-drag', 'node-drag-stop'],
       setup(props, { emit }) {
         return () => h('div', { class: 'wfd-flow-mock' }, [
           ...(props.nodes as Array<{ id: string; data: { name: string } }>).map(node => h('button', { class: 'vue-flow__node', type: 'button', onClick: () => emit('node-click', { node }) }, node.data.name)),
@@ -40,8 +41,210 @@ vi.mock('@vue-flow/core', async () => {
 })
 
 const validModel = fixture as WorkflowModel
+const parallelModel: WorkflowModel = {
+  processId: 'parallel_approval', processName: '并行审批',
+  nodes: [
+    { id: 'start', type: 'start', name: '开始', x: 280, y: 20 },
+    { id: 'apply', type: 'approval', name: '提交申请', x: 280, y: 130 },
+    { id: 'split', type: 'parallel', name: '并行分流', x: 280, y: 240 },
+    { id: 'finance', type: 'approval', name: '财务审批', x: 120, y: 350 },
+    { id: 'legal', type: 'approval', name: '法务审批', x: 440, y: 350 },
+    { id: 'join', type: 'parallel', name: '并行汇合', x: 280, y: 460 },
+    { id: 'archive', type: 'approval', name: '归档', x: 280, y: 570 },
+    { id: 'end', type: 'end', name: '结束', x: 280, y: 680 },
+  ],
+  flows: [
+    { source: 'start', target: 'apply' }, { source: 'apply', target: 'split' },
+    { source: 'split', target: 'finance' }, { source: 'split', target: 'legal' },
+    { source: 'finance', target: 'join' }, { source: 'legal', target: 'join' },
+    { source: 'join', target: 'archive' }, { source: 'archive', target: 'end' },
+  ],
+}
 
 describe('public WorkflowDesigner behavior', () => {
+  it('keeps conditions and history when reconnecting a real edge update and blocks readonly or duplicate updates', async () => {
+    const input = structuredClone(parallelModel)
+    input.flows[1]!.conditionExpression = 'amount > 1'
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input } })
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    const exported = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    await flow.vm.$emit('edge-update', { edge: { id: 'flow-1' }, connection: { source: 'split', target: 'archive' } })
+    expect(exported().flows[1]).toMatchObject({ source: 'split', target: 'archive', conditionExpression: 'amount > 1' })
+    await flow.vm.$emit('edge-update', { edge: { id: 'flow-1' }, connection: { source: 'split', target: 'finance' } })
+    expect(exported().flows[1]!.target).toBe('archive')
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(exported().flows[1]).toEqual(input.flows[1])
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    await wrapper.setProps({ readonly: true })
+    await flow.vm.$emit('edge-update', { edge: { id: 'flow-1' }, connection: { source: 'apply', target: 'join' } })
+    expect(exported().flows[1]!.source).toBe('split')
+    wrapper.unmount()
+  })
+
+  it('saves a parallel fragment without start/end, reopens it and compiles a recursive independent snapshot', async () => {
+    const fragment = structuredClone(parallelModel)
+    fragment.nodes = fragment.nodes.filter(node => !['start', 'end'].includes(node.type))
+    fragment.flows = fragment.flows.filter(edge => edge.source !== 'start' && edge.target !== 'end')
+    const wrapper = mount(WorkflowDesigner, { props: { mode: 'subprocess-fragment', modelValue: fragment } })
+    const api = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; validate: () => unknown[] }
+    expect(api.validate()).toEqual([])
+    await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
+    const name = wrapper.get('.wfd-inspector input')
+    await name.setValue('片段并行分流'); await name.trigger('change')
+    const saved = JSON.parse(JSON.stringify(api.exportDesign()))
+    const copy = mount(WorkflowDesigner, { props: { mode: 'subprocess-fragment', modelValue: saved } })
+    expect((copy.vm as unknown as { validate: () => unknown[] }).validate()).toEqual([])
+    const source = { key: 'parallel-fragment', name: '并行片段', displayJson: { nodes: saved.model.nodes, flows: saved.model.flows } }
+    const input = structuredClone(parallelModel)
+    input.nodes[1] = { ...input.nodes[1]!, type: 'subProcess', process: { nodes: [{ id: 'inner', name: '递归容器', type: 'subProcess', x: 100, y: 100, process: source.displayJson }], flows: [] } }
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const host = mount(WorkflowDesigner, { props: { modelValue: input, compile } })
+    await (host.vm as unknown as { compile: () => Promise<unknown> }).compile()
+    expect(compile).toHaveBeenCalledOnce()
+    expect(toWorkflowCompilerJson(compile.mock.calls[0]![0])).toMatchObject({ nodes: expect.arrayContaining([expect.objectContaining({ type: 'subProcess', process: { nodes: expect.arrayContaining([expect.objectContaining({ process: { nodes: expect.arrayContaining([expect.objectContaining({ type: 'parallel' })]), flows: source.displayJson.flows } })]), flows: [] } })]) })
+    wrapper.unmount(); copy.unmount(); host.unmount()
+  })
+
+  it.each([{ branch: 'pass' }, { branch: 'reject' }, { branch: 'default' }, { branch: 'other' }, { conditionExpression: 'amount > 1' }, { branch: '', conditionExpression: '' }, { branch: 'pass', conditionExpression: 'amount > 1' }])('preserves and explicitly repairs illegal parallel conditions %j in one history step', async conditions => {
+    const input = structuredClone(parallelModel)
+    Object.assign(input.flows[2]!, conditions)
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const deploy = vi.fn()
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input, compile, deploy } })
+    const api = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; compile: () => Promise<unknown> }
+    expect(api.exportDesign().model.flows[2]).toMatchObject(conditions)
+    await api.compile(); expect(compile).not.toHaveBeenCalled()
+    expect(wrapper.findAll('button').find(button => button.text() === '发布任务模板')!.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('.vue-flow__edge')[2]!.trigger('click')
+    const clear = () => wrapper.findAll('button').find(button => button.text() === '清除并行出线条件')!
+    await wrapper.setProps({ readonly: true })
+    expect(clear().attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ readonly: false })
+    await clear().trigger('click')
+    expect(api.exportDesign().model.flows[2]).toEqual({ source: 'split', target: 'finance' })
+    await api.compile(); expect(compile).toHaveBeenCalledOnce()
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(api.exportDesign().model.flows[2]).toMatchObject(conditions)
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(api.exportDesign().model.flows[2]).toEqual({ source: 'split', target: 'finance' })
+    wrapper.unmount()
+  })
+
+  it('preserves reconnected conditions and enforces the same endpoint rules including self-edge exclusion', async () => {
+    const input = structuredClone(parallelModel)
+    input.flows[1]!.conditionExpression = 'amount > 1'
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input, extensions: { canConnect: () => true } } })
+    const exported = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    await wrapper.findAll('.vue-flow__edge')[1]!.trigger('click')
+    const fields = () => wrapper.findAll('.wfd-inspector select')
+    await fields()[2]!.setValue('archive')
+    expect(exported().flows[1]).toMatchObject({ source: 'apply', target: 'archive' })
+    await fields()[1]!.setValue('split')
+    expect(exported().flows[1]).toMatchObject({ source: 'split', target: 'archive', conditionExpression: 'amount > 1' })
+    await wrapper.findAll('button.wfd-issue').find(button => button.text().includes('并行网关出边'))!.trigger('click')
+    expect(wrapper.text()).toContain('清除并行出线条件')
+    await fields()[2]!.setValue('finance')
+    expect(exported().flows[1]!.target).toBe('archive')
+    await fields()[2]!.setValue('split')
+    expect(exported().flows[1]!.target).toBe('archive')
+    await fields()[1]!.setValue('end')
+    expect(exported().flows[1]!.source).toBe('split')
+    expect(exported().flows[1]!.conditionExpression).toBe('amount > 1')
+    wrapper.unmount()
+  })
+
+  it('locates a condition error on the current edge after another flow is deleted', async () => {
+    const input = structuredClone(parallelModel)
+    input.flows[3]!.conditionExpression = 'amount > 1'
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input } })
+    await wrapper.findAll('.vue-flow__edge')[2]!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '删除')!.trigger('click')
+    await wrapper.findAll('button.wfd-issue').find(button => button.text().includes('并行网关出边'))!.trigger('click')
+    expect(wrapper.text()).toContain('清除并行出线条件')
+    expect(wrapper.get('.wfd-inspector textarea').element.value).toBe('amount > 1')
+    wrapper.unmount()
+  })
+
+  it('retains unknown edge data when clearing parallel conditions', async () => {
+    const input = structuredClone(parallelModel)
+    Object.assign(input.flows[2]!, { branch: 'other', future: { keep: true } })
+    const compile = vi.fn()
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input, compile } })
+    await wrapper.findAll('.vue-flow__edge')[2]!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '清除并行出线条件')!.trigger('click')
+    const api = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; compile: () => Promise<unknown> }
+    expect(api.exportDesign().model.flows[2]).toEqual({ source: 'split', target: 'finance', future: { keep: true } })
+    await api.compile(); expect(compile).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('applies the parallel template through public history, export, compile and explicit publish', async () => {
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' }), deploy = vi.fn()
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel, compile, deploy } })
+    await wrapper.findAll('button').find(button => button.text() === '流程模板')!.trigger('click')
+    await wrapper.get('input[value="parallel-approval"]').setValue()
+    await wrapper.findAll('button').find(button => button.text() === '使用模板')!.trigger('click')
+    const api = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; compile: () => Promise<unknown> }
+    const model = api.exportDesign().model
+    expect(model.nodes.filter(node => node.type === 'parallel')).toHaveLength(2)
+    expect(model.nodes.every(node => /^[A-Za-z]+_[0-9a-f]{32}$/.test(node.id))).toBe(true)
+    expect(model.flows.every(edge => model.nodes.some(node => node.id === edge.source) && model.nodes.some(node => node.id === edge.target))).toBe(true)
+    await api.compile(); expect(compile).toHaveBeenCalledWith(model)
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(api.exportDesign().model).toEqual(validModel)
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(api.exportDesign().model).toEqual(model)
+    wrapper.unmount()
+  })
+
+  it('edits a parallel split, connects both branches, round-trips history and submits the public callbacks', async () => {
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const deploy = vi.fn().mockResolvedValue({ version: 1 })
+    const input = { ...parallelModel, flows: parallelModel.flows.filter(flow => flow.source !== 'split') }
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input, compile, deploy } })
+    const exported = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign()
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    await flow.vm.$emit('connect', { source: 'split', target: 'finance' })
+    await flow.vm.$emit('connect', { source: 'split', target: 'legal' })
+    expect(exported().model.flows.filter(edge => edge.source === 'split')).toEqual([
+      { source: 'split', target: 'finance' }, { source: 'split', target: 'legal' },
+    ])
+    expect(wrapper.get('.wfd-inspector select').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.wfd-inspector textarea').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('.vue-flow__node')[2]!.trigger('click')
+    expect(wrapper.text()).toContain('同时激活全部出线')
+    const name = wrapper.get('.wfd-inspector input')
+    await name.setValue('部门并行办理'); await name.trigger('change')
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(exported().model.nodes[2]!.name).toBe('并行分流')
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(exported().model.nodes[2]!.name).toBe('部门并行办理')
+    const copy = mount(WorkflowDesigner, { props: { modelValue: JSON.parse(JSON.stringify(exported())), compile, deploy } })
+    await (copy.vm as unknown as { compile: () => Promise<unknown> }).compile()
+    expect(compile).toHaveBeenCalledWith(exported().model)
+    await copy.findAll('button').find(button => button.text() === '发布任务模板')!.trigger('click')
+    expect(deploy).not.toHaveBeenCalled()
+    await copy.findAll('button').find(button => button.text() === '确认发布')!.trigger('click')
+    expect(deploy).toHaveBeenCalledWith(exported().model)
+    copy.unmount(); wrapper.unmount()
+  })
+
+  it('creates a draggable parallel with host defaults and respects read-only mode', async () => {
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: parallelModel, extensions: { nodeTypes: ['parallel'], nodeDefaults: { parallel: { name: '部门汇合', bizJson: '并行数据' } } } } })
+    expect(wrapper.findAll('.wfd-library-item')).toHaveLength(1)
+    const transfer = { getData: () => 'parallel' }
+    await wrapper.get('main[aria-label="流程画布"]').trigger('drop', { dataTransfer: transfer, clientX: 200, clientY: 250 })
+    const exported = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign()
+    expect(exported().model.nodes.at(-1)).toMatchObject({ type: 'parallel', name: '部门汇合', bizJson: '并行数据', x: 200, y: 250 })
+    expect(toCanvas(exported().model).nodes.at(-1)).toMatchObject({ draggable: true, connectable: true })
+    await wrapper.setProps({ readonly: true })
+    expect(wrapper.get('.wfd-library-item').attributes('disabled')).toBeDefined()
+    const before = exported()
+    await wrapper.get('main[aria-label="流程画布"]').trigger('drop', { dataTransfer: transfer })
+    expect(exported()).toEqual(before)
+    wrapper.unmount()
+  })
+
   it('binds a published fixed form version and preserves it through history and import without changing form', async () => {
     const model = { ...validModel, nodes: validModel.nodes.map(node => node.id === 'apply' ? { ...node, form: 'legacy-form' } : node) }
     const businessForms = { list: vi.fn().mockResolvedValue([{ key: 'leave', name: '请假单', version: 3, status: 'PUBLISHED' }]), get: vi.fn().mockResolvedValue({ key: 'leave', name: '请假单', version: 3, status: 'PUBLISHED' }) }
@@ -62,15 +265,15 @@ describe('public WorkflowDesigner behavior', () => {
   it('shows and creates all built-in nodes using registered defaults', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
     const titles = wrapper.findAll('.wfd-library-item strong').map(item => item.text())
-    expect(titles).toHaveLength(9)
+    expect(titles).toHaveLength(10)
     expect(titles.every((title, index) => title.includes([
-      '开始', '审批', '多人审批', '服务调用', '消息等待', '定时等待', '条件分支', '嵌入式子流程', '结束',
+      '开始', '审批', '多人审批', '服务调用', '消息等待', '定时等待', '条件分支', '并行网关', '嵌入式子流程', '结束',
     ][index]!))).toBe(true)
     expect(wrapper.findAll('.wfd-library-group h3').map(item => item.text())).toEqual(['人工与服务', '流程事件', '流程控制'])
-    expect(wrapper.findAll('.wfd-library-icon svg')).toHaveLength(9)
+    expect(wrapper.findAll('.wfd-library-icon svg')).toHaveLength(10)
     const expected = [
       ['start', '开始'], ['approval', '审批'], ['countersign', '多人审批'], ['service', '服务调用'],
-      ['receive', '消息等待'], ['timer', '定时等待'], ['condition', '条件分支'], ['subProcess', '嵌入式子流程'], ['end', '结束'],
+      ['receive', '消息等待'], ['timer', '定时等待'], ['condition', '条件分支'], ['parallel', '并行网关'], ['subProcess', '嵌入式子流程'], ['end', '结束'],
     ] as const
 
     for (const [type, title] of expected) {
@@ -78,6 +281,10 @@ describe('public WorkflowDesigner behavior', () => {
       expect(button, `${title} should be in the node library`).toBeDefined()
       await button!.trigger('click')
       expect(wrapper.find('input[placeholder="可选，供宿主业务系统识别"]').exists()).toBe(true)
+      const data = wrapper.get('.wfd-inspector textarea[rows="4"]')
+      expect(data.element.closest('label')?.textContent).toContain('业务数据（bizJson）')
+      await data.setValue('节点业务数据：' + type)
+      expect((wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.at(-1)?.bizJson).toBe('节点业务数据：' + type)
     }
 
     const nodes = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes
@@ -139,6 +346,66 @@ describe('public WorkflowDesigner behavior', () => {
     expect((compile.mock.calls[0]![0] as WorkflowModel).nodes.find(node => node.id === 'minister')?.process).toEqual({ processId: 'budget-fragment', processName: '预算审批', nodes: fragment.displayJson.nodes, flows: fragment.displayJson.flows })
   })
 
+  it('edits and exports fragment business data, reuses its snapshot and refreshes only explicitly', async () => {
+    const bizJson = ['  内部中文 "review" <&>', 'review_bizJson: 保留  '].join(String.fromCharCode(10))
+    const fragmentEditor = mount(WorkflowDesigner, { props: { mode: 'subprocess-fragment', modelValue: {
+      processId: 'fragment', processName: '审批片段', nodes: [{ id: 'review', type: 'approval', name: '内部审批', x: 10, y: 20 }], flows: [],
+    } } })
+    const fragmentVm = fragmentEditor.vm as unknown as { exportDesign: () => { model: WorkflowModel } }
+    await fragmentEditor.find('.vue-flow__node').trigger('click')
+    expect(fragmentEditor.find('input[placeholder="可选，供宿主业务系统识别"]').exists()).toBe(false)
+    await fragmentEditor.get('textarea[rows="4"]').setValue(bizJson)
+    await fragmentEditor.get('textarea[rows="4"]').trigger('focus')
+    await fragmentEditor.get('textarea[rows="4"]').setValue('')
+    expect(fragmentVm.exportDesign().model.nodes[0]).not.toHaveProperty('bizJson')
+    await fragmentEditor.get('button[aria-label="撤销"]').trigger('click')
+    expect(fragmentVm.exportDesign().model.nodes[0]?.bizJson).toBe(bizJson)
+    await fragmentEditor.get('button[aria-label="重做"]').trigger('click')
+    expect(fragmentVm.exportDesign().model.nodes[0]).not.toHaveProperty('bizJson')
+    await fragmentEditor.get('button[aria-label="撤销"]').trigger('click')
+    const fragment = { key: 'business-fragment', name: '审批片段', displayJson: fragmentVm.exportDesign().model }
+    await fragmentEditor.setProps({ readonly: true })
+    await fragmentEditor.find('.vue-flow__node').trigger('click')
+    expect((fragmentEditor.get('textarea[rows="4"]').element as HTMLTextAreaElement).disabled).toBe(true)
+    expect((fragmentEditor.get('textarea[rows="4"]').element as HTMLTextAreaElement).value).toBe(bizJson)
+    const subprocessFragments = { list: vi.fn().mockResolvedValue([fragment]), get: vi.fn().mockImplementation(async () => fragment) }
+    const model = {
+      processId: 'main', processName: '主流程', nodes: [
+        { id: 'start', type: 'start', name: '开始', x: 10, y: 10 },
+        { id: 'container', type: 'subProcess', name: '容器', bizJson: '容器默认值', x: 10, y: 120 },
+        { id: 'end', type: 'end', name: '结束', x: 10, y: 240 },
+      ], flows: [{ source: 'start', target: 'container' }, { source: 'container', target: 'end' }],
+    } as WorkflowModel
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: model, compile, extensions: { subprocessFragments } } })
+    const vm = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; compile: () => Promise<unknown> }
+    const container = () => vm.exportDesign().model.nodes[1]!
+    await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
+    await vi.waitFor(() => expect(wrapper.find('.wfd-subprocess-select-field option[value="business-fragment"]').exists()).toBe(true))
+    await wrapper.get('.wfd-subprocess-select-field select').setValue('business-fragment')
+    await vi.waitFor(() => expect(container().process?.nodes[0]?.bizJson).toBe(bizJson))
+    expect(container().bizJson).toBe('容器默认值')
+    fragment.displayJson.nodes[0]!.bizJson = '片段库新版'
+    expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const refresh = wrapper.findAll('button').find(button => button.text() === '刷新快照')!
+    await refresh.trigger('click')
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+    expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
+    confirm.mockReturnValue(true)
+    await refresh.trigger('click')
+    await vi.waitFor(() => expect(container().process?.nodes[0]?.bizJson).toBe('片段库新版'))
+    expect(container().bizJson).toBe('容器默认值')
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    const restored = mount(WorkflowDesigner, { props: { modelValue: JSON.parse(JSON.stringify(vm.exportDesign())), compile } })
+    await (restored.vm as unknown as { compile: () => Promise<unknown> }).compile()
+    expect(compile.mock.calls[0]![0].nodes[1]).toMatchObject({ bizJson: '容器默认值', process: { nodes: [expect.objectContaining({ id: 'review', bizJson: '片段库新版' })] } })
+    expect(toWorkflowCompilerJson(compile.mock.calls[0]![0]).nodes[1]).not.toHaveProperty('subProcessKey')
+    confirm.mockRestore(); restored.unmount(); wrapper.unmount(); fragmentEditor.unmount()
+  })
+
   it('loads a nested subprocess fragment without leaking source metadata into its compiler process', async () => {
     const nested = {
       processId: 'outer-fragment', processName: '外层', width: 800, height: 480,
@@ -176,22 +443,75 @@ describe('public WorkflowDesigner behavior', () => {
     expect(wrapper.text()).toContain('宿主校验问题')
     expect(wrapper.find('.wfd-inspector input[placeholder="例如：project-form"]').exists()).toBe(false)
     expect(wrapper.find('.wfd-inspector input[placeholder="可选，供宿主业务系统识别"]').exists()).toBe(false)
+    expect(wrapper.find('.wfd-inspector textarea[rows="4"]').exists()).toBe(false)
   })
 
   it('disables bizType editing when the workflow designer is read-only', async () => {
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel, readonly: true } })
     await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
     expect((wrapper.get('input[placeholder="可选，供宿主业务系统识别"]').element as HTMLInputElement).disabled).toBe(true)
+    expect((wrapper.get('.wfd-inspector textarea[rows="4"]').element as HTMLTextAreaElement).disabled).toBe(true)
   })
 
-  it('lets the host connection rule override the registered node connection rules', async () => {
+  it('preserves opaque bizJson through edits, node switches, history, design import, model binding and compilation', async () => {
+    const bizJson = "  中文 \"review\" <tag>&\nreview_bizJson: 非 JSON  "
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel, compile } })
+    const exported = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign()
+    expect(exported().model.nodes.every(node => !Object.hasOwn(node, 'bizJson'))).toBe(true)
+    await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
+    const data = wrapper.get('.wfd-inspector textarea[rows="4"]')
+    await data.trigger('focus')
+    await data.setValue(bizJson)
+    expect(exported().model.nodes[1]?.bizJson).toBe(bizJson)
+    const writeback = wrapper.emitted('update:modelValue')!.at(-1)![0]
+    expect(writeback).toMatchObject({ model: { nodes: expect.arrayContaining([expect.objectContaining({ id: 'apply', bizJson })]) } })
+    await wrapper.setProps({ modelValue: writeback as never })
+    await wrapper.get('.wfd-inspector input:not([disabled])').setValue('改名后仍保留数据')
+    await wrapper.findAll('.vue-flow__node')[2]!.trigger('click')
+    expect((wrapper.get('.wfd-inspector textarea[rows="4"]').element as HTMLTextAreaElement).value).toBe('')
+    await wrapper.get('.wfd-inspector textarea[rows="4"]').setValue('另一个节点')
+    await wrapper.findAll('.vue-flow__node')[1]!.trigger('click')
+    expect((wrapper.get('.wfd-inspector textarea[rows="4"]').element as HTMLTextAreaElement).value).toBe(bizJson)
+    await wrapper.get('.wfd-inspector textarea[rows="4"]').trigger('focus')
+    await wrapper.get('.wfd-inspector textarea[rows="4"]').setValue('')
+    expect(exported().model.nodes[1]).not.toHaveProperty('bizJson')
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(exported().model.nodes[1]?.bizJson).toBe(bizJson)
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(exported().model.nodes[1]).not.toHaveProperty('bizJson')
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
+    await flow.vm.$emit('node-drag-start')
+    await flow.vm.$emit('node-drag-stop')
+    expect(exported().model.nodes[1]?.bizJson).toBe(bizJson)
+    const restored = mount(WorkflowDesigner, { props: { modelValue: JSON.parse(JSON.stringify(exported())), compile } })
+    await (restored.vm as unknown as { compile: () => Promise<unknown> }).compile()
+    expect(compile.mock.calls[0]![0].nodes[1]).toMatchObject({ name: '改名后仍保留数据', bizJson })
+    expect(compile.mock.calls[0]![0].nodes[2].bizJson).toBe('另一个节点')
+    restored.unmount(); wrapper.unmount()
+  })
+
+  it.each([{}, [], null, 42, false])('retains imported invalid bizJson %j and blocks the public compile operation', async bizJson => {
+    const compile = vi.fn()
+    const input = { ...validModel, nodes: validModel.nodes.map(node => node.id === 'apply' ? { ...node, bizJson } : node) } as unknown as WorkflowModel
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input, compile } })
+    const vm = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; validate: () => { code: string; path: string }[]; compile: () => Promise<unknown> }
+    expect(vm.exportDesign().model.nodes[1]?.bizJson).toEqual(bizJson)
+    expect(vm.validate()).toContainEqual(expect.objectContaining({ code: 'field-type', path: '/nodes/1/bizJson' }))
+    await vm.compile()
+    expect(compile).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps mandatory connection restrictions when the host permits a connection', async () => {
     const canConnect = vi.fn(() => true)
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel, extensions: { canConnect } } })
     const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
     await flow.vm.$emit('connect', { source: 'end', target: 'apply' })
     const exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
-    expect(canConnect).toHaveBeenCalledOnce()
-    expect(exported.flows.at(-1)).toMatchObject({ source: 'end', target: 'apply' })
+    expect(canConnect).not.toHaveBeenCalled()
+    expect(exported.flows).toEqual(validModel.flows)
   })
 
   it('rejects connections forbidden by node definitions and keeps condition checks contextual', async () => {

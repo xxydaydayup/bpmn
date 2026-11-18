@@ -1,0 +1,13 @@
+{
+  "capturedAt": "2026-11-17T09:07:04.213Z",
+  "source": "http://192.168.124.202:8085/bpmn/spec",
+  "sha256": "06867da11a32183032fab39fc46fdeb649d611c9dfc51bec4f1f2c4a06b14ec7",
+  "backendVersion": 1,
+  "scope": "Human decision runtime protocol. Does not replace the 2026-11-16 model/schema compatibility baseline. Backend kept version=1 despite changed semantics; identify snapshots by capturedAt and SHA-256.",
+  "mapping": {
+    "currentHumanComplete": "declared Boolean passed, source=complete, approval/countersign",
+    "legacyHumanComplete": "declared approved:Boolean or public vote:agree/reject",
+    "readOnly": "source=engine, template-fixed and service/worker results",
+    "taskVersion": "task processDefinitionId + matching template snapshot; never latest template"
+  }
+}

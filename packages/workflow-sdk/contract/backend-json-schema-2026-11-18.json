@@ -1,0 +1,812 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ht-go-camunda:simple-process:1.0.0",
+  "title": "简化流程描述 JSON（SimpleProcessDTO）",
+  "description": "POST /bpmn/json2xml 的请求体契约，面向业务 / 前端。只描述业务语义（节点是什么、流程怎么走），审批人、会签监听器、分支条件等技术配置由服务端自动补全。本 Schema 是严格契约：node / flow 不允许未声明字段；服务端为兼容历史画布数据会忽略未知展示字段，但 SDK 生成的 JSON 应满足本 Schema。旧节点类型（startEvent / userTask / exclusiveGateway / parallelGateway / endEvent / receiveTask）仍被服务端兼容，但不属于本 Schema 的建模范围。",
+  "type": "object",
+  "required": ["processId", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "processId": {
+      "$ref": "#/$defs/processId"
+    },
+    "processName": {
+      "type": "string",
+      "description": "流程名称，仅展示用。"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "节点列表，不能为空；同一层节点 id 必须唯一。",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "flows": {
+      "type": "array",
+      "description": "连线列表；source / target 必须存在于同层 nodes 中。不传表示没有显式连线。",
+      "items": {
+        "$ref": "#/$defs/flow"
+      }
+    },
+    "bizFormKey": {
+      "description": "流程级业务表单 key：固化成启动变量 bizFormKey，节点级 bizFormKey 优先。",
+      "$ref": "#/$defs/bizFormKey"
+    }
+  },
+  "$defs": {
+    "processId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+      "description": "流程定义 key，写入 BPMN process id；需以字母或下划线开头。"
+    },
+    "nodeId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+      "description": "节点 / 连线 id，同层唯一。节点 id 会派生运行时变量名（{id}_assignee 等），建议只使用字母、数字、下划线。"
+    },
+    "bizFormKey": {
+      "type": "string",
+      "pattern": "^(?:form:[^@\\s]+(?:@(?:latest|\\d+))?|route:\\S+)$",
+      "description": "表单 key：form:<formKey>、form:<formKey>@<版本>、form:<formKey>@latest 或 route:<前端路由>。"
+    },
+    "approveMode": {
+      "type": "string",
+      "enum": ["ALL", "ANY", "VOTE"],
+      "description": "会签审批模式：ALL 全部通过 / ANY 任一通过 / VOTE 按 passRate 投票。"
+    },
+    "passRate": {
+      "type": "string",
+      "pattern": "^(?:0\\.[0-9]*[1-9][0-9]*|1(?:\\.0+)?)$",
+      "description": "投票通过比例，字符串形式的 (0,1]，如 \"0.6\" 或 \"1\"；approveMode=VOTE 时必填。"
+    },
+    "isoDuration": {
+      "type": "string",
+      "pattern": "^P(?=\\d|T\\d)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+(\\.\\d+)?S)?)?$",
+      "description": "ISO-8601 时长，如 PT30M / PT2H / P1D。"
+    },
+    "isoDateTime": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})?$",
+      "description": "ISO-8601 时间点，如 2026-12-31T23:59:59 或 2026-12-31T23:59:59+08:00。"
+    },
+    "reminder": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duration": {
+          "description": "超时时长；不填则由发起实例时传 {节点id}_reminderDuration，缺省 P1D。",
+          "$ref": "#/$defs/isoDuration"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["notify", "return", "end"],
+          "default": "notify",
+          "description": "超时动作：notify 非中断提醒（缺省）/ return 中断并退回 target / end 中断并结束整个实例。"
+        },
+        "target": {
+          "description": "仅 action=return：退回目标节点 id，必须是同层已存在的 approval / countersign / service / subProcess 活动节点，且不能是自身。",
+          "$ref": "#/$defs/nodeId"
+        },
+        "name": {
+          "type": "string",
+          "description": "边界事件名称，缺省「{节点名称}超时提醒 / 超时退回 / 超时终止」。"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "return"
+              }
+            },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["target"],
+            "properties": {
+              "target": {
+                "$ref": "#/$defs/nodeId"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": ["notify", "end"]
+              }
+            },
+            "required": ["action"]
+          },
+          "then": {
+            "properties": {
+              "target": false
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": ["action"],
+              "properties": {
+                "action": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "target": false
+            }
+          }
+        }
+      ]
+    },
+    "nodeBase": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nodeId"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["start", "approval", "countersign", "condition", "parallel", "service", "receive", "timer", "subProcess", "end"],
+          "description": "节点语义类型。"
+        },
+        "name": {
+          "type": "string",
+          "description": "节点名称，展示用，同时用于超时提醒文案。"
+        },
+        "bizType": {
+          "type": "string",
+          "description": "业务自定义类型码 / 状态码，写入 camunda:property(bizType)，不进入流程变量。"
+        },
+        "bizJson": {
+          "type": "string",
+          "description": "业务自定义数据（JSON 字符串，服务端不校验格式），作为模板默认值，可被实例变量 {节点id}_bizJson 覆盖。"
+        },
+        "form": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Camunda 表单 key，写入 camunda:formKey；不传则不生成。"
+        },
+        "bizFormKey": {
+          "description": "节点级业务表单，固化成启动变量 {节点id}_bizFormKey，优先于流程级 bizFormKey。",
+          "$ref": "#/$defs/bizFormKey"
+        },
+        "x": {
+          "type": "integer",
+          "description": "画布 X 坐标，缺省自动布局。"
+        },
+        "y": {
+          "type": "integer",
+          "description": "画布 Y 坐标，缺省自动布局。"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "节点宽度，缺省按类型取默认值。"
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "节点高度，缺省按类型取默认值。"
+        }
+      }
+    },
+    "approvalNode": {
+      "type": "object",
+      "properties": {
+        "assignee": {
+          "type": "string",
+          "minLength": 1,
+          "description": "办理人，缺省 ${节点id}_assignee。"
+        },
+        "allowTransfer": {
+          "type": "boolean",
+          "description": "是否允许转办 / 委派 / 重派；缺省允许，只有 false 才拒绝。"
+        },
+        "reminder": {
+          "description": "审批超时配置。",
+          "$ref": "#/$defs/reminder"
+        }
+      }
+    },
+    "countersignNode": {
+      "type": "object",
+      "properties": {
+        "approveMode": {
+          "$ref": "#/$defs/approveMode"
+        },
+        "passRate": {
+          "$ref": "#/$defs/passRate"
+        },
+        "sequential": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否串行会签，缺省 false（并行）。"
+        },
+        "allowTransfer": {
+          "type": "boolean",
+          "description": "是否允许转办 / 委派 / 重派；缺省允许，只有 false 才拒绝。"
+        },
+        "allowAddSigner": {
+          "type": "boolean",
+          "description": "是否允许加签；仅并行会签有效，缺省允许，只有 false 才拒绝。"
+        },
+        "reminder": {
+          "description": "会签超时配置。",
+          "$ref": "#/$defs/reminder"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "approveMode": {
+                "const": "VOTE"
+              }
+            },
+            "required": ["approveMode"]
+          },
+          "then": {
+            "required": ["passRate"],
+            "properties": {
+              "passRate": {
+                "$ref": "#/$defs/passRate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "sequential": {
+                "const": true
+              }
+            },
+            "required": ["sequential"]
+          },
+          "then": {
+            "properties": {
+              "allowAddSigner": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "conditionNode": {
+      "type": "object",
+      "properties": {
+        "statusVariable": {
+          "type": "string",
+          "minLength": 1,
+          "description": "状态分支变量名，缺省 {节点id}_status。"
+        }
+      }
+    },
+    "serviceNode": {
+      "type": "object",
+      "properties": {
+        "serviceName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "服务名称；填了则固化到 BPMN，发起实例无需传入。"
+        },
+        "serviceUrl": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^https?://\\S+$",
+          "description": "服务地址；填了则固化到 BPMN，发起实例无需传入。"
+        },
+        "countersign": {
+          "type": "boolean",
+          "description": "是否启用服务节点会签；开启后按 {节点id}_serviceList 生成多实例。"
+        },
+        "approveMode": {
+          "$ref": "#/$defs/approveMode"
+        },
+        "passRate": {
+          "$ref": "#/$defs/passRate"
+        },
+        "sequential": {
+          "type": "boolean",
+          "default": false,
+          "description": "服务会签是否串行，缺省 false（并行）。"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "not": {
+                  "required": ["countersign"],
+                  "properties": {
+                    "countersign": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "countersign": {
+                    "const": false
+                  }
+                },
+                "required": ["countersign"]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "approveMode": false,
+              "passRate": false,
+              "sequential": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "countersign": {
+                "const": true
+              },
+              "approveMode": {
+                "const": "VOTE"
+              }
+            },
+            "required": ["countersign", "approveMode"]
+          },
+          "then": {
+            "required": ["passRate"],
+            "properties": {
+              "passRate": {
+                "$ref": "#/$defs/passRate"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "receiveNode": {
+      "type": "object",
+      "properties": {
+        "messageName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "消息名；填了则模板固定，不填则发起实例时传 {节点id}_messageName，仍缺失时缺省用节点 id。"
+        }
+      }
+    },
+    "timerNode": {
+      "type": "object",
+      "properties": {
+        "timerType": {
+          "type": "string",
+          "enum": ["duration", "date", "cycle"],
+          "default": "duration",
+          "description": "定时类型，决定 timerEventDefinition 子元素。"
+        },
+        "timerValue": {
+          "type": "string",
+          "minLength": 1,
+          "description": "定时时间：duration 为 ISO-8601 时长，date 为 ISO-8601 时间点，cycle 为 ISO-8601 重复间隔或 cron。"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "timerType": {
+                "const": "duration"
+              }
+            },
+            "required": ["timerType"]
+          },
+          "then": {
+            "properties": {
+              "timerValue": {
+                "$ref": "#/$defs/isoDuration"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "timerType": {
+                "const": "date"
+              }
+            },
+            "required": ["timerType"]
+          },
+          "then": {
+            "properties": {
+              "timerValue": {
+                "$ref": "#/$defs/isoDateTime"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": ["timerType"],
+              "properties": {
+                "timerType": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "timerValue": {
+                "$ref": "#/$defs/isoDuration"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "subProcessNode": {
+      "type": "object",
+      "required": ["process"],
+      "properties": {
+        "process": {
+          "description": "内嵌的完整流程定义；内部 nodes 不能为空，可继续嵌套 subProcess。",
+          "$ref": "#/$defs/subProcessBody"
+        },
+        "reminder": {
+          "description": "子流程整体超时配置，挂在子流程节点的边界定时事件上。",
+          "$ref": "#/$defs/reminder"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/nodeBase"
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "approval"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/approvalNode"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "countersign"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/countersignNode"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "condition"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/conditionNode"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "service"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/serviceNode"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "receive"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/receiveNode"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "timer"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/timerNode"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "subProcess"
+              }
+            },
+            "required": ["type"]
+          },
+          "then": {
+            "$ref": "#/$defs/subProcessNode"
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "flow": {
+      "type": "object",
+      "required": ["source", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "连线 id，可选；缺省生成 flow_{source}_{target}。",
+          "$ref": "#/$defs/nodeId"
+        },
+        "source": {
+          "description": "源节点 id，必须存在于同层 nodes 中。",
+          "$ref": "#/$defs/nodeId"
+        },
+        "target": {
+          "description": "目标节点 id，必须存在于同层 nodes 中。",
+          "$ref": "#/$defs/nodeId"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "description": "分支语义：pass / reject 按上游 {节点id}_passed 自动生成条件；default 仅 condition 网关可用；其他值作为 condition 网关的状态值。"
+        },
+        "conditionExpression": {
+          "type": "string",
+          "minLength": 1,
+          "description": "显式 EL 条件，优先级高于 branch；如 ${leaveDays > 3}。"
+        }
+      }
+    },
+    "subProcessBody": {
+      "type": "object",
+      "required": ["nodes"],
+      "additionalProperties": false,
+      "properties": {
+        "processId": {
+          "description": "子流程内无意义，填了会被忽略。",
+          "$ref": "#/$defs/processId"
+        },
+        "processName": {
+          "type": "string",
+          "description": "子流程内无意义，填了会被忽略。"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "description": "子流程内部节点，不能为空；内部 id 只需在本层唯一，展开时会自动加 {子流程节点id}_ 前缀。",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "flows": {
+          "type": "array",
+          "description": "子流程内部连线；只能连本层节点，不能跨子流程边界。",
+          "items": {
+            "$ref": "#/$defs/flow"
+          }
+        },
+        "bizFormKey": {
+          "description": "子流程级业务表单 key。",
+          "$ref": "#/$defs/bizFormKey"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "processId": "leave_approval",
+      "processName": "请假审批",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "name": "开始"
+        },
+        {
+          "id": "apply",
+          "type": "approval",
+          "name": "申请审批"
+        },
+        {
+          "id": "end",
+          "type": "end",
+          "name": "结束"
+        }
+      ],
+      "flows": [
+        {
+          "source": "start",
+          "target": "apply"
+        },
+        {
+          "source": "apply",
+          "target": "end"
+        }
+      ]
+    },
+    {
+      "processId": "leave_approval_v2",
+      "processName": "请假审批（会签 + 超时）",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "name": "开始"
+        },
+        {
+          "id": "apply",
+          "type": "approval",
+          "name": "申请审批",
+          "assignee": "demo",
+          "reminder": {
+            "duration": "PT30M",
+            "action": "notify"
+          }
+        },
+        {
+          "id": "gw",
+          "type": "condition",
+          "name": "是否通过"
+        },
+        {
+          "id": "managers",
+          "type": "countersign",
+          "name": "经理会签",
+          "approveMode": "VOTE",
+          "passRate": "0.6",
+          "sequential": false,
+          "allowAddSigner": true
+        },
+        {
+          "id": "end",
+          "type": "end",
+          "name": "结束"
+        }
+      ],
+      "flows": [
+        {
+          "source": "start",
+          "target": "apply"
+        },
+        {
+          "source": "apply",
+          "target": "gw"
+        },
+        {
+          "source": "gw",
+          "target": "managers",
+          "branch": "pass"
+        },
+        {
+          "source": "gw",
+          "target": "end",
+          "branch": "reject"
+        },
+        {
+          "source": "managers",
+          "target": "end"
+        }
+      ]
+    },
+    {
+      "processId": "budget_approval",
+      "processName": "预算审批（含子流程与服务节点）",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "start",
+          "name": "开始"
+        },
+        {
+          "id": "sub_1",
+          "type": "subProcess",
+          "name": "预算子流程",
+          "process": {
+            "nodes": [
+              {
+                "id": "s",
+                "type": "start",
+                "name": "子流程开始"
+              },
+              {
+                "id": "apply",
+                "type": "approval",
+                "name": "预算审批",
+                "reminder": {
+                  "duration": "PT1H"
+                }
+              },
+              {
+                "id": "e",
+                "type": "end",
+                "name": "子流程结束"
+              }
+            ],
+            "flows": [
+              {
+                "source": "s",
+                "target": "apply"
+              },
+              {
+                "source": "apply",
+                "target": "e"
+              }
+            ]
+          }
+        },
+        {
+          "id": "notify",
+          "type": "service",
+          "name": "通知财务",
+          "serviceName": "finance-notify",
+          "serviceUrl": "http://finance.internal/notify"
+        },
+        {
+          "id": "end",
+          "type": "end",
+          "name": "结束"
+        }
+      ],
+      "flows": [
+        {
+          "source": "start",
+          "target": "sub_1"
+        },
+        {
+          "source": "sub_1",
+          "target": "notify"
+        },
+        {
+          "source": "notify",
+          "target": "end"
+        }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,7 @@ export interface WorkflowNode {
   width?: number
   height?: number
   bizType?: string
+  bizJson?: string
   form?: string
   bizFormKey?: string
   assignee?: string

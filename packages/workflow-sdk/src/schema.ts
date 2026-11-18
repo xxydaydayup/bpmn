@@ -37,7 +37,7 @@ export const workflowModelSchema = {
       properties: {
         id: identifier, type: { enum: [...WORKFLOW_NODE_TYPES, ...LEGACY_WORKFLOW_NODE_TYPES] },
         name: string, x: { type: 'integer' }, y: { type: 'integer' }, width: { type: 'integer' }, height: { type: 'integer' },
-        bizType: string, form: string, bizFormKey: string, assignee: string, statusVariable: string,
+        bizType: string, bizJson: string, form: string, bizFormKey: string, assignee: string, statusVariable: string,
         messageName: string, timerType: { enum: ['duration', 'date', 'cycle'] }, timerValue: string,
         serviceName: string, serviceUrl: string, countersign: boolean,
         approveMode: { enum: ['ALL', 'ANY', 'VOTE'] }, passRate: string, sequential: boolean,

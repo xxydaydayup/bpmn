@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "lib": ["ES2022"], "types": [],
+    "target": "ES2022", "lib": ["ES2022", "DOM"], "types": [],
     "module": "NodeNext", "moduleResolution": "NodeNext",
     "strict": true, "verbatimModuleSyntax": true,
     "noUnusedLocals": true, "noUnusedParameters": true,

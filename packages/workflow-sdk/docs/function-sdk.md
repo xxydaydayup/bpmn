@@ -16,7 +16,7 @@ declare const hostRequest: WorkflowRequester
 const workflow = createWorkflowClient({ request: hostRequest, timeoutMs: 15000 })
 
 // 配置/发布阶段执行一次。也可分别 compile(definition) 和检查 XML。
-const template = await workflow.publish(definition, { startable: true })
+const template = await workflow.publish(definition)
 console.log(template.templateVersion, template.deploymentId, template.processDefinitionId)
 
 const instance = await workflow.start('project_review', {
@@ -93,6 +93,6 @@ const request: WorkflowRequester = async ({ method, path, query, headers, body, 
 
 只读核对示例见 [write-recovery.mjs](../examples/write-recovery.mjs)。完成响应丢失时，可按已知实例查询当前任务、历史与进度，核对原 taskId 是否结束。启动响应丢失时，错误仍保留 templateKey/businessKey，但不臆造未知实例 ID；模板任务查询只提供候选页，必须由宿主按业务键核对真实实例。无任务、分页未取到或最新版本查询为空均不能证明启动失败。发布核对也须考虑并发版本，不能把当前模板直接当成丢失响应对应的版本。
 
-显式发布 startable 与后端返回值不一致时，抛出 PUBLISH_OPTIONS_MISMATCH，effect=confirmed，并保留实际 templateSnapshot、deploymentId、processDefinitionId 与 HTTP 状态。当前网关将 startable=false 保存为 true，此选项尚未通过真实验收；调用者应核对已有部署，不要重新发布或假定模板已禁止发起。
+2026-11-18 起发布请求不再发送 startable，可发起状态由后端管理。PublishOptions.startable 保留为弃用兼容字段：true 被接受但不发送，false 在任何网络请求前以 UNSUPPORTED_PUBLISH_OPTION（effect=none）拒绝，避免调用者误以为禁发起设置已保存。模板响应中的 startable 仍原样保留；旧 PUBLISH_OPTIONS_MISMATCH 不再产生。历史 startable=false 保存差异保留在验证记录。
 
 实际网关尚有验收差异，见 [验证记录](./function-sdk-verification.md)。权限、租户、参数最终校验、worker、通知与审计始终属于后端。

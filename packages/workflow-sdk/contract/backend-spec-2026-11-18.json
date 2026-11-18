@@ -1,0 +1,651 @@
+{
+  "version": 1,
+  "endpoint": {
+    "method": "POST",
+    "path": "/bpmn/json2xml",
+    "contentType": "application/json",
+    "description": "简化流程 JSON 转 BPMN 2.0 XML：自动补全审批人、会签监听器、分支条件等技术配置；校验失败返回 400。"
+  },
+  "topLevel": {
+    "processId": {
+      "type": "string",
+      "required": true,
+      "description": "流程定义 key，写入 BPMN process id"
+    },
+    "processName": {
+      "type": "string",
+      "required": false,
+      "description": "流程名称，仅展示用"
+    },
+    "nodes": {
+      "type": "array<node>",
+      "required": true,
+      "description": "节点列表，不能为空；节点 id 必须唯一"
+    },
+    "flows": {
+      "type": "array<flow>",
+      "required": false,
+      "description": "连线列表；source / target 必须存在于 nodes 中"
+    },
+    "bizFormKey": {
+      "type": "string",
+      "required": false,
+      "description": "流程级业务表单 key：整条流程共用一张，固化成启动变量 bizFormKey（节点级 bizFormKey 优先）。值形如 form:<formKey>@<版本> / form:<formKey>@latest / route:<前端路由>"
+    }
+  },
+  "node": {
+    "fields": {
+      "id": {
+        "type": "string",
+        "required": true,
+        "description": "节点 id，流程内唯一，运行时变量名由它派生"
+      },
+      "type": {
+        "type": "string",
+        "required": true,
+        "description": "节点语义类型；兼容旧值 startEvent / userTask / exclusiveGateway / parallelGateway / endEvent / receiveTask（旧值不做自动补全）",
+        "allowed": [
+          "start",
+          "approval",
+          "countersign",
+          "condition",
+          "parallel",
+          "service",
+          "receive",
+          "timer",
+          "subProcess",
+          "end"
+        ]
+      },
+      "name": {
+        "type": "string",
+        "required": false,
+        "description": "节点名称，展示用，同时用于变量说明文案"
+      },
+      "form": {
+        "type": "string",
+        "required": false,
+        "description": "表单 key，写入 camunda:formKey；不传则不生成"
+      },
+      "bizType": {
+        "type": "string",
+        "required": false,
+        "description": "任意节点：业务标识（业务自定义的类型码 / 状态码），写入节点 extensionElements 的 camunda:property(name=bizType)，随 BPMN 部署。不进入流程变量，不影响 /bpmn/variables；运行时会带进 NATS task / reminder 事件，任务详情 GET /api/v1/tasks/{id} 也会返回。不传则不生成该属性"
+      },
+      "bizJson": {
+        "type": "string",
+        "required": false,
+        "description": "任意节点：业务自定义数据（JSON 字符串，业务自行定义结构，服务端不校验格式），非必填。设计时填写则写入节点 extensionElements 的 camunda:property(name=bizJson)，作为模板默认值；留空则发起实例时可传 {节点id}_bizJson 变量绑定，实例变量优先于模板默认值，运行中可通过 POST /api/v1/process-instances/{id}/variables 修改（删除变量后回落模板默认值）。运行时会带进 NATS task / reminder 事件，任务详情 GET /api/v1/tasks/{id} 也会返回"
+      },
+      "statusVariable": {
+        "type": "string",
+        "required": false,
+        "description": "仅 condition：状态分支变量名，缺省 {节点id}_status。多分支时业务按该变量的状态值选择走哪条出边；显式传则以传入值为准"
+      },
+      "messageName": {
+        "type": "string",
+        "required": false,
+        "description": "仅 receive：消息名，写入 receiveTask 的消息订阅。填了则固化到 BPMN；不填则发起实例时传 {节点id}_messageName，仍未传时缺省用节点 id。业务方通过 POST /api/v1/messages 按此名发送消息触发流程继续"
+      },
+      "timerType": {
+        "type": "string",
+        "required": false,
+        "description": "仅 timer：定时类型，决定 timerEventDefinition 用哪个子元素（结构选型，只能模板侧定）。duration（缺省）等待一段时长；date 等到指定时间点；cycle 按周期触发",
+        "allowed": [
+          "duration",
+          "date",
+          "cycle"
+        ]
+      },
+      "timerValue": {
+        "type": "string",
+        "required": false,
+        "description": "仅 timer：定时时间，格式随 timerType：duration 为 ISO-8601 时长（PT30M / PT2H / P1D），date 为 ISO-8601 时间点（2026-12-31T23:59:59），cycle 为 ISO-8601 重复间隔（R3/PT10H）或 cron 表达式。填了则固化到 BPMN；不填则发起实例时必传 {节点id}_timerValue（无兜底值）"
+      },
+      "serviceName": {
+        "type": "string",
+        "required": false,
+        "description": "仅 service：服务名称；填了则固化到 BPMN，发起实例无需传入"
+      },
+      "serviceUrl": {
+        "type": "string",
+        "required": false,
+        "description": "仅 service：服务地址；填了则固化到 BPMN，发起实例无需传入"
+      },
+      "countersign": {
+        "type": "boolean",
+        "required": false,
+        "description": "仅 service：是否启用服务节点会签。开启后按 {节点id}_serviceList 生成多实例，每个实例各写 {节点id}_result_{序号}，汇总由引擎只读计算"
+      },
+      "approveMode": {
+        "type": "string",
+        "required": false,
+        "description": "会签（countersign / service+countersign）审批模式。填了则固化到 BPMN；不填则发起实例时传 {节点id}_approveMode，缺省 ALL",
+        "allowed": [
+          "ALL",
+          "ANY",
+          "VOTE"
+        ]
+      },
+      "passRate": {
+        "type": "string",
+        "required": false,
+        "description": "会签（countersign / service+countersign）通过比例，范围 (0,1]。模板里 approveMode=VOTE 时必须同时填写；模板不填则由发起实例时传 {节点id}_passRate"
+      },
+      "sequential": {
+        "type": "boolean",
+        "required": false,
+        "description": "会签（countersign / service+countersign）是否串行，缺省 false（并行）"
+      },
+      "process": {
+        "type": "object<process>",
+        "required": false,
+        "description": "仅 type=subProcess：内嵌的完整流程定义，结构与本规范顶层完全一致（processId / processName / nodes / flows），必填且内部 nodes 不能为空，可以继续嵌套。顶层 processId / processName 对子流程没有意义，内层填了会被忽略。内部节点支持全部类型（含 subProcess）与全部字段（form / reminder / countersign 等），规则与本层相同；唯一的差别是内部节点 / 连线 id 展开时统一加「{子流程节点id}_」前缀，reminder.target 也随本层前缀重写，所以只能选同一层的节点"
+      },
+      "reminder": {
+        "type": "object",
+        "required": false,
+        "description": "仅 approval / countersign / subProcess：超时配置。不填则无超时；填了则自动派生 {节点id}_reminderTimer（边界定时事件），再按 action 生成后续分支：notify（缺省）非中断提醒 + {节点id}_reminderEnd；return 中断并退回 target；end 中断并终止整个流程实例（进入派生的 {节点id}_timeoutEnd）。派生节点前端无需画；duration 优先级、派生规则见顶层 reminder 段",
+        "fields": {
+          "duration": {
+            "type": "string",
+            "required": false,
+            "description": "ISO-8601 时长，如 PT30M / PT2H / P1D。填了则固化到 BPMN；不填则发起实例时传 {节点id}_reminderDuration，缺省 P1D"
+          },
+          "action": {
+            "type": "string",
+            "required": false,
+            "description": "超时动作：notify 非中断提醒（缺省）/ return 中断并退回 / end 中断并结束",
+            "allowed": [
+              "notify",
+              "return",
+              "end"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "required": false,
+            "description": "仅 action=return：退回目标节点 id，必须是已存在的 approval / countersign / service / subProcess / userTask 活动节点，不能是当前节点自身；子流程内外不能互退（连线会跨子流程边界），只能选同一层的节点"
+          },
+          "name": {
+            "type": "string",
+            "required": false,
+            "description": "边界事件名称，缺省「{节点名称}超时提醒 / 超时退回 / 超时终止」"
+          }
+        }
+      },
+      "allowTransfer": {
+        "type": "boolean",
+        "required": false,
+        "description": "仅 approval / countersign：是否允许转办 / 委派 / 重派。填了则固化进 BPMN，由 process 级 start 监听器写成 Boolean 变量 {节点id}_allowTransfer；发起实例再传同名变量会被覆盖（模板优先）。缺省允许，只有 false 才拒绝"
+      },
+      "allowAddSigner": {
+        "type": "boolean",
+        "required": false,
+        "description": "仅 countersign（且必须并行，sequential 不为 true）：是否允许加签。填了则固化成 Boolean 变量 {节点id}_allowAddSigner；缺省允许，只有 false 才拒绝。串行会签填 true 直接报错（引擎不支持给串行多实例加签）"
+      },
+      "bizFormKey": {
+        "type": "string",
+        "required": false,
+        "description": "任意节点：节点级业务表单，固化成启动变量 {节点id}_bizFormKey，优先于顶层 bizFormKey；与 form 字段写入的 camunda:formKey 无关。值形如 form:<formKey>@<版本> / form:<formKey>@latest / route:<前端路由>"
+      },
+      "assignee": {
+        "type": "string",
+        "required": false,
+        "description": "仅 approval：办理人，缺省 ${节点id}_assignee；countersign 忽略该值"
+      },
+      "x": {
+        "type": "integer",
+        "required": false,
+        "description": "画布 X 坐标，缺省自动布局"
+      },
+      "y": {
+        "type": "integer",
+        "required": false,
+        "description": "画布 Y 坐标，缺省自动布局"
+      },
+      "width": {
+        "type": "integer",
+        "required": false,
+        "description": "节点宽度，缺省按节点类型取默认值"
+      },
+      "height": {
+        "type": "integer",
+        "required": false,
+        "description": "节点高度，缺省按节点类型取默认值"
+      }
+    },
+    "types": {
+      "start": {
+        "bpmnElement": "startEvent",
+        "description": "开始节点",
+        "variables": []
+      },
+      "approval": {
+        "bpmnElement": "userTask",
+        "description": "单人审批；缺省 assignee 为 ${节点id}_assignee，发起实例时传 {节点id}_assignee",
+        "variables": [
+          "{节点id}_assignee"
+        ]
+      },
+      "countersign": {
+        "bpmnElement": "userTask + multiInstance",
+        "description": "多人审批（会签 / 或签 / 投票）；审批人集合必传，每个办理人完成任务时传 {节点id}_passed=true/false，结果由 VoteListener 计票后写回同名变量",
+        "variables": [
+          "{节点id}_approverList",
+          "{节点id}_approveMode",
+          "{节点id}_passRate",
+          "{节点id}_passed"
+        ]
+      },
+      "condition": {
+        "bpmnElement": "exclusiveGateway",
+        "description": "排他网关。出边全是 pass / reject 时沿用布尔分支（上游需恰好一个审批类节点）；出现其他 branch 值或非默认出边 ≥ 3 时切状态模式，生成 {节点id}_status == '状态值'，状态变量自动进入 global_variables，状态值全部不填时按出边顺序自动生成 S1、S2 ...；branch=default 为默认分支",
+        "variables": [
+          "{节点id}_status"
+        ]
+      },
+      "parallel": {
+        "bpmnElement": "parallelGateway",
+        "description": "并行网关（fork / join 同一个元素）：多条出边时全部分支同时激活，多条入边时等所有分支到齐再继续。出边不能配 branch / conditionExpression（引擎在并行网关上不评估条件，配了会 400）。注意分支必须能在某个 join 汇合，否则实例会一直挂在那里；只用一条分支配超时终止时，超时节点固定带 terminateEventDefinition，会结束整个实例",
+        "variables": []
+      },
+      "service": {
+        "bpmnElement": "serviceTask（外部任务，topic=service）",
+        "description": "外部服务节点；服务名 / 地址可模板固定，也可发起实例时传入。countersign=true 时生成多实例服务会签",
+        "variables": [
+          "{节点id}_serviceName",
+          "{节点id}_serviceUrl",
+          "{节点id}_passed"
+        ]
+      },
+      "service + countersign": {
+        "bpmnElement": "serviceTask + multiInstance",
+        "description": "服务节点会签：按调用清单并行 / 串行调用多个外部服务，每个实例各写 {节点id}_result_{序号}，通过判定由引擎按 APPROVE_MODE 只读汇总（worker 不写共享变量，因此并发完成不会乐观锁冲突）",
+        "variables": [
+          "{节点id}_serviceList",
+          "{节点id}_approveMode",
+          "{节点id}_passRate",
+          "{节点id}_result_{序号}"
+        ]
+      },
+      "receive": {
+        "bpmnElement": "receiveTask + message",
+        "description": "消息等待任务：执行到这里挂起，直到业务方按 messageName 发送消息后继续；消息可携带 variables 写入流程变量",
+        "variables": [
+          "{节点id}_messageName"
+        ]
+      },
+      "timer": {
+        "bpmnElement": "intermediateCatchEvent + timerEventDefinition",
+        "description": "定时等待节点：执行到这里挂起，到达指定时间后引擎自动推进，不产生任务也无需外部触发；timerType 三选一（duration 缺省 / date / cycle），时间值可模板固定（timerValue）也可发起实例时传 {节点id}_timerValue",
+        "variables": [
+          "{节点id}_timerValue"
+        ]
+      },
+      "subProcess": {
+        "bpmnElement": "subProcess（嵌入式，triggeredByEvent=false，递归嵌套）",
+        "description": "子流程：内嵌完整流程 JSON（process 字段，结构同顶层），必填且内部 nodes 不能为空，可嵌套。内部节点 / 连线 id 展开时统一加「{子流程节点id}_」前缀（sub_1 里的 apply 变成 sub_1_apply，变量名 sub_1_apply_assignee），嵌套逐层累加；因此内部 id 只需在本层唯一，同一份子流程模板在一个流程里复用两次也不会串参数。内部 start / end 保留为子流程内部出入口（嵌入式子流程需要），内部 end 不注入 task_finish，只有根流程的 end 才把业务任务置为完成。连线不能跨子流程边界：子流程内的连线只能连本层节点，子流程与外部只通过子流程节点本身进出。子流程节点本身可配 reminder（挂在子流程上的边界定时事件，中断型会中断整段子流程）",
+        "variables": []
+      },
+      "end": {
+        "bpmnElement": "endEvent",
+        "description": "结束节点",
+        "variables": []
+      }
+    },
+    "legacyTypes": [
+      "startEvent",
+      "userTask",
+      "exclusiveGateway",
+      "parallelGateway",
+      "endEvent",
+      "receiveTask"
+    ],
+    "legacyNote": "旧值原样透传，不做自动补全（不生成审批人、会签、分支条件等技术配置）"
+  },
+  "subProcess": {
+    "description": "子流程（type=subProcess）：节点自身只是容器，业务流程全部写在它的 process 字段里，生成嵌入式 <bpmn:subProcess triggeredByEvent=false>；process 可再嵌套 subProcess，层数不限",
+    "nodeFields": [
+      "id",
+      "type=subProcess",
+      "name",
+      "process（必填）",
+      "reminder",
+      "x",
+      "y",
+      "width",
+      "height"
+    ],
+    "processShape": {
+      "processId": "可选；子流程没有自己的 process id，内层填了会被忽略（顶层 processId 生效）",
+      "processName": "可选；同样忽略，节点名取子流程节点的 name",
+      "nodes": "必填，不能为空；内部节点支持全部类型（start / approval / countersign / condition / service / receive / timer / subProcess / end）与全部字段",
+      "flows": "可选；只能连本层节点，跨层连线（连到子流程外或子流程外连到里面）会被按前缀判定为不存在并报 400"
+    },
+    "rules": [
+      "subProcess 节点必须带 process，内部 nodes 为空或缺失报 400：子流程节点 {id} 的 process 不能为空",
+      "内部节点 / 连线 id 展开时统一加「{子流程节点id}_」前缀，嵌套逐层累加（sub_1_sub_2_inner）；内部 id 只需在本层唯一",
+      "内部节点的变量名 / 任务定义 key 与展开后的 id 同前缀：sub_1 里的 apply 对外是 sub_1_apply，变量是 sub_1_apply_assignee，发起实例 / 完成任务时按这个全名传",
+      "内部 start 是子流程内部入口、内部 end 是内部出口，都保留；内部 end 不注入 task_finish，不会把业务任务置为完成（只有根流程的 end 才注入）",
+      "子流程节点本身可配 reminder：边界定时事件与子流程同层，notify 非中断提醒，return 中断退回、end 中断结束；中断型会中断整段子流程",
+      "内部节点上的 reminder.target 只能选同一层的节点（子流程内外不能互退），且不能是自身",
+      "内部节点的 x / y 是相对子流程容器左上角的坐标；不传则与根流程一样按类型自动布局",
+      "同一份子流程 JSON 在一个流程里复用多次（两个 subProcess 节点各带一份 process）时，变量与任务 key 靠前缀区分，不会串参数"
+    ],
+    "example": {
+      "id": "sub_1",
+      "type": "subProcess",
+      "name": "预算子流程",
+      "process": {
+        "nodes": [
+          {
+            "id": "s",
+            "type": "start",
+            "name": "子流程开始"
+          },
+          {
+            "id": "apply",
+            "type": "approval",
+            "name": "预算审批",
+            "reminder": {
+              "duration": "PT1H",
+              "action": "notify"
+            }
+          },
+          {
+            "id": "e",
+            "type": "end",
+            "name": "子流程结束"
+          }
+        ],
+        "flows": [
+          {
+            "source": "s",
+            "target": "apply"
+          },
+          {
+            "source": "apply",
+            "target": "e"
+          }
+        ]
+      }
+    },
+    "expandedNote": "上面这段展开后：子流程内节点 id 为 sub_1_s / sub_1_apply / sub_1_e，审批人变量为 sub_1_apply_assignee，子流程外层用 sub_1 这个节点 id 连自己的进出线"
+  },
+  "reminder": {
+    "description": "审批超时：可在 approval / countersign / subProcess 节点上填 reminder 对象，按 action 选择处理策略。派生的节点与连线全部由后端生成，前端不用画，也不要出现在 nodes / flows 里",
+    "actions": {
+      "notify": {
+        "default": true,
+        "cancelActivity": false,
+        "description": "非中断提醒：到点投递 NATS，原审批任务继续等待",
+        "derivedNodes": [
+          {
+            "id": "{节点id}_reminderTimer",
+            "element": "boundaryEvent + timerEventDefinition",
+            "description": "非中断边界定时事件（cancelActivity=false），挂在原用户节点上；节点名即提醒文案（缺省「{节点名称}超时提醒」）"
+          },
+          {
+            "id": "{节点id}_reminderEnd",
+            "element": "endEvent",
+            "description": "提醒分支收尾节点，只结束该分支的 token，不代表流程结束；网关部署时会跳过它，不会在它前面注入 task_finish"
+          }
+        ],
+        "flows": [
+          "{节点id}_reminderTimer -> {节点id}_reminderEnd"
+        ]
+      },
+      "return": {
+        "cancelActivity": true,
+        "requiredFields": [
+          "target"
+        ],
+        "description": "中断并退回：到点取消当前审批任务，边界事件出边直接连到 target 节点；不派生额外节点，也不投递 NATS",
+        "targetRules": [
+          "必须存在于 nodes 中",
+          "只能是 approval / countersign / service / subProcess / userTask 活动节点",
+          "不能是当前节点自身"
+        ]
+      },
+      "end": {
+        "cancelActivity": true,
+        "description": "中断并终止整个流程实例：到点取消当前审批任务并进入 {节点id}_timeoutEnd（带 terminateEventDefinition，并行分支一并结束）；不投递 NATS",
+        "derivedNodes": [
+          {
+            "id": "{节点id}_reminderTimer",
+            "element": "boundaryEvent + timerEventDefinition",
+            "description": "中断边界定时事件（cancelActivity=true）"
+          },
+          {
+            "id": "{节点id}_timeoutEnd",
+            "element": "endEvent + terminateEventDefinition",
+            "description": "超时终止节点，代表流程真正结束（含并行分支）；部署时会正常注入 task_finish，业务任务按 COMPLETED 回写"
+          }
+        ],
+        "flows": [
+          "{节点id}_reminderTimer -> {节点id}_timeoutEnd"
+        ]
+      }
+    },
+    "durationResolution": [
+      "reminder.duration 填了：固化到 BPMN，由 process 级 start 监听器写入 {节点id}_reminderDuration，发起实例无需再传",
+      "reminder.duration 没填：发起实例时传 {节点id}_reminderDuration；仍未传时 BPMN 用 EL 兜底为 P1D，定时器不会因变量缺失报错"
+    ],
+    "message": {
+      "appliesTo": "仅 action=notify；return / end 为中断型动作，不挂执行监听器、不投递消息",
+      "transport": "NATS",
+      "publisher": "引擎侧执行监听器 ${reminderListener}，挂在边界事件的 event=start 上",
+      "subject": "{subject-prefix}.{tenantId}.reminder，与 task 域分开；默认前缀 camunda（即 camunda.{tenantId}.reminder）",
+      "timing": "定时器触发、执行流进入边界事件时投递；发布带 flush 确认，失败会抛出异常让定时器 job 回滚重试，因此属于「至少一次」，订阅方需按 nodeId + processInstanceId 幂等",
+      "fields": {
+        "eventType": "固定 reminder；任务事件为 task.create / task.assignment / task.complete / task.delete",
+        "nodeId": "原审批节点 id（由 activityId 去掉 _reminderTimer 后缀得到）",
+        "executionId / activityId": "触发提醒的执行流 id 与边界事件节点 id",
+        "reminderName": "提醒文案，取自边界事件节点名",
+        "bizType": "可选，宿主审批节点上配置的业务标识（bizType）",
+        "bizJson": "可选，宿主审批节点的业务自定义数据：实例变量 {节点id}_bizJson 优先，缺失取模板 bizJson 默认值",
+        "tenantId / businessKey / processInstanceId / processDefinitionId / processDefinitionKey": "流程标识，用于回查业务数据",
+        "reminderTime": "投递时间，RFC3339",
+        "duration": "可选，{节点id}_reminderDuration 的值",
+        "assignee": "可选，仅 approval：{节点id}_assignee",
+        "approvers": "可选，仅 countersign：{节点id}_approverList 集合"
+      }
+    }
+  },
+  "flow": {
+    "fields": {
+      "id": {
+        "type": "string",
+        "required": false,
+        "description": "连线 id；缺省生成 flow_{source}_{target}，冲突时追加序号"
+      },
+      "source": {
+        "type": "string",
+        "required": true,
+        "description": "源节点 id，必须存在于 nodes 中"
+      },
+      "target": {
+        "type": "string",
+        "required": true,
+        "description": "目标节点 id，必须存在于 nodes 中"
+      },
+      "branch": {
+        "type": "string",
+        "required": false,
+        "description": "分支语义。pass / reject：按上游结果自动推导（人工审批 / 服务都取 {节点id}_passed，reject 取反）；default：仅 condition 网关可用，作为默认分支，不生成条件；其他值：condition 网关的状态值，生成 {节点id}_status == '值'"
+      },
+      "conditionExpression": {
+        "type": "string",
+        "required": false,
+        "description": "显式 EL 条件，优先级高于 branch"
+      }
+    },
+    "rules": [
+      "source / target 必填且必须存在于 nodes 中",
+      "branch=pass / reject 仅适用于 approval / countersign / service 节点的出边，或 condition 网关的出边",
+      "condition 网关的出边全为 pass / reject 时沿用原布尔分支，上游需有且仅有一个审批类节点",
+      "condition 网关出现其他 branch 值时切状态模式：每条非默认出边必须有唯一状态值，全部不填时按出边顺序自动生成 S1、S2 ...；状态模式不能与 pass / reject 混用",
+      "condition 网关最多一条 branch=default；默认分支不能配置 conditionExpression",
+      "状态变量由直接上游决定：上游是 approval 时随该任务完成传入（source=complete），其余情况在发起实例时传入（source=start）；countersign / service 暂不自动生成状态变量",
+      "显式 conditionExpression 会覆盖按 branch 推导的条件"
+    ]
+  },
+  "rules": [
+    "nodes 不能为空；同一层（根流程或同一个子流程内）节点 id 不能重复",
+    "子流程（含嵌套）内部的节点 / 连线 id 展开时自动加「{子流程节点id}_」前缀，变量名与任务定义 key 同前缀（sub_1_apply_assignee），内部 id 只需在本层唯一",
+    "type 不支持时直接报错，不会静默丢弃节点",
+    "flow.source / flow.target 必须存在于 nodes 中；flow.id 不能重复",
+    "approveMode 只能是 ALL / ANY / VOTE，其他值报错",
+    "passRate 必须是 (0,1] 的数字；模板里 approveMode=VOTE 时未填 passRate 会报错",
+    "countersign 只对 type=service 生效；countersign 类型本身即会签，该字段忽略",
+    "服务会签的调用清单 {节点id}_serviceList 由发起实例传入，模板不固化；需按 Object(application/json) 传对象数组，每项形如 {serviceName, serviceUrl}",
+    "服务会签每个实例只回写 {节点id}_result_{序号}，{节点id}_passed 是只读汇总值（不落流程变量）",
+    "reminder 只能配在 approval / countersign / subProcess 节点上，其他类型填了直接报错",
+    "reminder.duration 必须是 ISO-8601 时长（PT30M / PT2H / P1D），其他格式报错",
+    "reminder.action 只能是 notify / return / end，其他值报错；不传按 notify 处理",
+    "action=notify 不支持 target；action=return 必须传 target；action=end 不支持 target（结束节点由后端派生并带 terminateEventDefinition，终止整个流程实例）",
+    "action=return 的 target 必须是已存在的 approval / countersign / service / subProcess / userTask 活动节点，不能是当前节点自身",
+    "return / end 触发时会取消当前任务（会签会取消全部多实例实例），不会投递 NATS 消息",
+    "reminder 派生的 {节点id}_reminderEnd 只是提醒分支收尾，不代表流程结束；部署时不会在它前面注入 task_finish，因此 notify 不会提前把业务任务置为完成",
+    "action=end 派生的 {节点id}_timeoutEnd 代表流程结束，部署时会正常注入 task_finish，业务任务按 COMPLETED 回写",
+    "receive 节点的 messageName 填了则模板固定；不填则发起实例时传 {节点id}_messageName，仍未传时缺省用节点 id",
+    "receive 节点只等待消息，不产生任务；业务方通过 POST /api/v1/messages 按 messageName 发送消息触发，消息可带 variables 写入流程",
+    "timer 节点的 timerType 只能是 duration / date / cycle，缺省 duration；它决定 BPMN 结构，只能在模板侧配置",
+    "timer 节点的 timerValue 格式随 timerType，模板填写时按格式校验；不填则发起实例时必传 {节点id}_timerValue（无兜底值，两者都缺失时引擎运行到该节点报错）",
+    "timer 节点只等待时间，不产生任务也无需外部触发；与 reminder 的区别：reminder 挂在审批节点上做超时动作，timer 是主流程上的独立等待节点",
+    "节点 / 连线 JSON 中未知的展示字段（画布尺寸、样式等）会被忽略，不影响转换",
+    "subProcess 节点的 process 必填且内部 nodes 不能为空；process 结构与本规范顶层一致（nodes / flows），详见顶层 subProcess 段",
+    "子流程内外不能连线：内部连线只能连本层节点，外部只能通过子流程节点本身进出；内部节点坐标相对子流程容器左上角",
+    "转办 / 委派 / 重派受 {节点id}_allowTransfer 控制，加签受 {节点id}_allowAddSigner 控制；两者默认允许，只有 Boolean false 才拒绝（403），详见顶层 nodeSwitches 段",
+    "业务表单看实例变量 bizFormKey / {节点id}_bizFormKey，与节点 form 字段写入的 camunda:formKey 无关，字段 key 即变量名，详见顶层 bizForm 段",
+    "allowTransfer / allowAddSigner / bizFormKey 都支持两种给法：模板里填（固化成启动变量，模板优先）或发起实例时传；两者同时存在时以模板为准（与 serviceName 一致）",
+    "bizType 只在 BPMN 节点上留存（camunda:property），不生成流程变量，也不出现在 /bpmn/variables；子流程内部节点各自生效，NATS / 任务详情按展开后的节点（activityId）返回",
+    "bizJson 是业务自定义数据（JSON 字符串，不校验格式）：模板节点上填的是默认值（camunda:property），实例变量 {节点id}_bizJson 优先；起实例可绑定、运行中可通过修改变量接口随时变更，删除变量后回落模板默认值；子流程内部节点按展开后的 activityId 派生变量名，NATS / 任务详情同样按展开后节点返回"
+  ],
+  "runtimeVariables": {
+    "{节点id}_assignee": "approval 办理人，发起实例时传（模板显式 assignee 时不使用）",
+    "{节点id}_approverList": "countersign 审批人集合，发起实例时必传",
+    "{节点id}_approveMode": "countersign 审批模式；模板未固定时发起实例可传，缺省 ALL",
+    "{节点id}_passRate": "countersign 通过比例；模板未固定且 approveMode=VOTE 时发起实例传，范围 (0,1]",
+    "{节点id}_serviceName": "service 服务名称；模板未固定时发起实例传（服务会签时作为缺省值）",
+    "{节点id}_serviceUrl": "service 服务地址；模板未固定时发起实例传（服务会签时作为缺省值）",
+    "{节点id}_status": "condition 网关状态分支值；状态模式下必传，取值即出边 branch（或自动生成的 S1/S2...）；上游是 approval 时随任务完成传入，否则发起实例时传入",
+    "{节点id}_serviceList": "服务会签调用清单（Array），发起实例时必传；每项可带 serviceName / serviceUrl，缺省回退 {节点id}_serviceName / {节点id}_serviceUrl",
+    "{节点id}_messageName": "receive 消息名；模板未固定时发起实例可传，缺省节点 id；业务方发送消息时 messageName 必须与订阅名一致",
+    "{节点id}_timerValue": "timer 定时时间；模板未固定时发起实例必传，无兜底值；格式随节点 timerType：duration=ISO-8601 时长（PT30M），date=ISO-8601 时间点，cycle=重复间隔（R3/PT10H）或 cron",
+    "{节点id}_result_{序号}": "服务会签单实例执行结果（序号 = 多实例 loopCounter，从 0 开始），由外部任务 worker 回写；各实例写各自的变量，不产生并发写冲突",
+    "{节点id}_reminderDuration": "超时时长（ISO-8601，如 PT30M），notify / return / end 共用；模板未固定时发起实例传，缺省 P1D。notify 触发时该值会写入提醒消息的 duration 字段",
+    "{节点id}_passed": "是否通过（Boolean），人工审批与服务同一套：单人审批 / 会签每人的表决在完成任务时传 true / false，会签计票后节点结论写回同名变量；服务节点由外部任务 worker 回写，业务无需传；服务会签为只读汇总值（按 {节点id}_result_{序号} 实时计算），不作为流程变量存储",
+    "{节点id}_allowTransfer": "转办 / 委派 / 重派的开关（Boolean）。默认允许，只有 Boolean false 时才拒绝（POST /api/v1/tasks/{id}/assignee、/delegate、/reassign 返回 403 ACTION_NOT_ALLOWED）。两种给法：模板在节点上填 allowTransfer（固化成启动变量，模板值优先），或不填、发起实例时传 / 完成上游任务时写入",
+    "{节点id}_allowAddSigner": "会签节点加签开关（Boolean）。默认允许，Boolean false 时 POST /api/v1/process-instances/{id}/add-signer 返回 403 ACTION_NOT_ALLOWED；只对并行会签（sequential=false）有意义。两种给法：模板节点上填 allowAddSigner 固化，或不填、发起实例时传",
+    "bizFormKey": "流程级业务表单：整条流程共用一张，所有没单独配 {节点id}_bizFormKey 的节点都用它。模板顶层填 bizFormKey 会固化成启动变量（模板优先），也可发起实例时传",
+    "{节点id}_bizFormKey": "节点级业务表单，优先于流程级 bizFormKey（模板节点上填 bizFormKey 会固化，模板优先）；取值 form:<formKey>@<版本>（读该版本）、form:<formKey>@latest 或 form:<formKey>（取最新已发布版本）、route:<前端路由>（前端自己渲染）；缺失或值不认识按无表单处理",
+    "{节点id}_bizJson": "节点业务自定义数据（JSON 字符串，非必填，不校验格式）：发起实例时可传，优先于模板节点上的 bizJson 默认值；运行中可通过 POST /api/v1/process-instances/{id}/variables 修改或删除（删除后回落模板默认值），NATS task / reminder 事件与任务详情都会带上",
+    "子流程内的节点 id": "带「{子流程节点id}_」前缀：sub_1 里的 apply 对外就是 sub_1_apply，相关变量 / 任务定义 key 也带这个前缀（如 sub_1_apply_assignee）"
+  },
+  "nodeSwitches": {
+    "description": "节点级操作开关：默认允许，只有 Boolean false 才拒绝（403 ACTION_NOT_ALLOWED）。两种给法：① 模板在节点上填 allowTransfer / allowAddSigner，固化成 Boolean 启动变量；② 模板不填，发起实例时传 {节点id}_<flag>（或在完成上游任务时写入）。两者都有时以模板为准",
+    "definitionFields": {
+      "allowTransfer": "节点字段，Boolean。仅 approval / countersign 可用，其他类型填了直接报错；写进 BPMN 的是布尔字面量（不是字符串 \"false\"）",
+      "allowAddSigner": "节点字段，Boolean。仅并行 countersign 可用；串行会签填 true 报错"
+    },
+    "flags": {
+      "allowTransfer": "转办 / 委派 / 重派三个接口共用：POST /api/v1/tasks/{id}/assignee（转办）、/delegate（委派）、/reassign（重派）",
+      "allowAddSigner": "会签加签：POST /api/v1/process-instances/{id}/add-signer；只对并行会签有效，串行会签本身不支持加签，节点已走完也不能加"
+    },
+    "rules": [
+      "变量名用 BPMN 的 activityId；子流程内的节点带「{子流程节点id}_」前缀（sub_1 里的 apply 是 sub_1_apply_allowTransfer）",
+      "只认 Boolean false：字符串 \"false\"、0、null 都按允许处理（模板固化时后端会写成布尔字面量，不会踩这个坑）",
+      "开关是实例级变量，整条流程共用一份名字；同一个节点 id 在多处复用时共用开关",
+      "拒绝时返回 403 + code=ACTION_NOT_ALLOWED，message 里带具体变量名（如 apply_allowTransfer=false）"
+    ]
+  },
+  "bizForm": {
+    "description": "业务表单：来源是流程实例变量，不看 BPMN 的 camunda:formKey。任务详情接口 GET /api/v1/tasks/{id}/bizForm 按变量解析，返回表单 schema 与字段当前值",
+    "definitionFields": {
+      "bizFormKey（顶层）": "流程级表单，固化成启动变量 bizFormKey，整条流程共用一张",
+      "bizFormKey（节点）": "节点级表单，固化成启动变量 {节点id}_bizFormKey，优先于流程级"
+    },
+    "resolution": [
+      "先取 {taskDefinitionKey}_bizFormKey（节点级），为空再退回 bizFormKey（流程级）；两者都空 → type=none",
+      "form:<formKey>@<版本>：读 biz_form_history 里该版本的 form-js schema",
+      "form:<formKey>@latest 或 form:<formKey>：取该 formKey 的历史最大版本（任务只能看到已发布版本）",
+      "route:<前端路由>：原样返回路径，表单由业务前端自己渲染",
+      "变量不是字符串、前缀不认识、版本查不到 → 一律 type=none（data=null），不报错"
+    ],
+    "response": {
+      "type": "form / route / none",
+      "data": "type=form 时是 form-js schema；type=route 时是去掉 route: 前缀的路径；type=none 时为 null",
+      "values": "仅 type=form：表单字段的当前值，按字段 key 从任务变量里取，没填过的字段不返回"
+    },
+    "fieldVariables": "表单字段的 key 就是流程变量名（form-js 的 key）：完成该任务时传 {字段key: 值} 即可，不需要额外映射；子流程内的字段仍按原 key，不额外加前缀",
+    "rules": [
+      "表单变量有两种给法：模板顶层 / 节点上填 bizFormKey（固化成启动变量，模板优先），或发起实例时传 bizFormKey / {节点id}_bizFormKey",
+      "表单字段的值仍要写在发起实例 / 完成任务的 variables 里，字段 key 即变量名",
+      "一个流程换表单只改 bizFormKey：所有没单独配 {节点id}_bizFormKey 的节点都会跟着换",
+      "节点级变量名用 BPMN 的 activityId，子流程内要带前缀（sub_1_apply_bizFormKey）",
+      "表单 schema 查不到时返回 type=none，不会把任务卡住"
+    ]
+  },
+  "example": {
+    "processId": "leave_approval",
+    "processName": "请假审批",
+    "nodes": [
+      {
+        "id": "start",
+        "type": "start",
+        "name": "开始"
+      },
+      {
+        "id": "apply",
+        "type": "approval",
+        "name": "申请审批",
+        "reminder": {
+          "duration": "PT30M"
+        }
+      },
+      {
+        "id": "gw",
+        "type": "condition",
+        "name": "是否通过"
+      },
+      {
+        "id": "managers",
+        "type": "countersign",
+        "name": "经理会签",
+        "sequential": false,
+        "approveMode": "ANY"
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "name": "结束"
+      }
+    ],
+    "flows": [
+      {
+        "source": "start",
+        "target": "apply"
+      },
+      {
+        "source": "apply",
+        "target": "gw"
+      },
+      {
+        "source": "gw",
+        "target": "managers",
+        "branch": "pass"
+      },
+      {
+        "source": "gw",
+        "target": "end",
+        "branch": "reject"
+      },
+      {
+        "source": "managers",
+        "target": "end"
+      }
+    ]
+  }
+}

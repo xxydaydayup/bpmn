@@ -1,3 +1,5 @@
+import type { CompleteInput, StartInput } from '@workflow/sdk/client'
+
 export type BusinessVariables = Record<string, unknown>
 
 export interface TaskTemplateVariable {
@@ -187,6 +189,8 @@ export interface BusinessWorkflowGateway {
   listTasks(query?: BusinessTaskQuery, signal?: AbortSignal): Promise<BusinessUserTask[]>
   completeTask(taskId: string, variables?: BusinessVariables): Promise<TaskCompletionResult>
   completeTaskByNode(taskId: string, input: CompleteBusinessTaskByNodeInput): Promise<TaskCompletionResult>
-  refuseTask(taskId: string): Promise<TaskRefuseResult>
-  reassignTask(taskId: string, userId: string): Promise<TaskReassignResult>
+  startWithSdk?(taskKey: string, input: StartInput): Promise<BusinessTaskInstance>
+  completeWithSdk?(task: BusinessUserTask, input: CompleteInput): Promise<TaskCompletionResult>
+  refuseTask(taskId: string, task?: BusinessUserTask): Promise<TaskRefuseResult>
+  reassignTask(taskId: string, userId: string, task?: BusinessUserTask): Promise<TaskReassignResult>
 }

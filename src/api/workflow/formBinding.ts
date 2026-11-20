@@ -19,7 +19,11 @@ export async function validateFormBindings(model: WorkflowModel, gateway: FormGa
   const visit = (nodes: WorkflowNodeRecord[], prefix = '') => {
     for (const node of nodes) {
       if (node.type === 'approval' || node.type === 'countersign') add(node.bizFormKey, prefix + (node.name || node.id))
-      if (node.process) visit(node.process.nodes, prefix + node.name + ' / ')
+      if (node.process) {
+        const childPrefix = prefix + (node.name || node.id) + ' / '
+        add(node.process.bizFormKey, childPrefix + '流程级业务表单')
+        visit(node.process.nodes, childPrefix)
+      }
     }
   }
   add(model.bizFormKey, '流程级业务表单'); visit(model.nodes)

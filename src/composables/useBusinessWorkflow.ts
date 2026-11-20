@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
-import { businessWorkflowGateway } from '@/api/workflow/gateway'
+import type { CompleteInput, Variables } from '@workflow/sdk/client'
+import { businessWorkflowGateway } from '@/api/workflow/sdkGateway'
 import { buildNodeFormConfigs, compileStartFormVariables, formSuggestionPreview, formValueKey, initialFormValues, startVariableName, validateFormValues, variablesWithEngineValues, type WorkflowNodeSnapshot } from '@/api/workflow/nodeForms'
 import type {
   BusinessTaskInstance,
@@ -374,7 +375,8 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     }
   }
 
-  async function startSelectedTemplateWithNodeMapping(useNodeMapping: boolean) {
+  async function startSelectedTemplateWithNodeMapping(useNodeMapping: boolean, useSdk = false) {
+    if (starting.value || disposed) return
     const template = selectedTemplate.value
     error.value = ''
     if (!template) { error.value = '请先选择任务模板'; return }
@@ -404,7 +406,9 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
         businessKey: businessKey.value.trim(),
         variables,
       }
-      lastInstance.value = useNodeMapping
+      lastInstance.value = useSdk
+        ? await gateway.startWithSdk!(template.taskKey, { businessKey: input.businessKey, variables: variables as Variables })
+        : useNodeMapping
         ? await gateway.startTaskInstanceByNode({ ...input, nodes: nodeVariables(startFormConfigs.value, startFormValues.value) })
         : await gateway.startTaskInstance(input)
       taskFilter.processInstanceId = lastInstance.value.processInstanceId
@@ -417,6 +421,10 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
 
   function startSelectedTemplate() {
     return startSelectedTemplateWithNodeMapping(false)
+  }
+
+  function startSelectedTemplateWithSdk() {
+    return startSelectedTemplateWithNodeMapping(false, true)
   }
 
   function startSelectedTemplateByNode() {
@@ -474,7 +482,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
   }
 
   async function handleTaskActionFailure(cause: unknown, fallback: string, taskId: string, preserveCompletionInput = false) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined
+    const status = isAxiosError(cause) ? cause.response?.status : cause && typeof cause === 'object' && 'httpStatus' in cause ? cause.httpStatus : undefined
     if (status === 404 || status === 409) {
       if (!preserveCompletionInput && selectedTask.value?.id === taskId) selectedTask.value = undefined
       if (reassignTargetTask.value?.id === taskId) {
@@ -490,7 +498,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     error.value = errorMessage(cause, fallback)
   }
 
-  async function completeSelectedTaskWithNodeMapping(useNodeMapping: boolean) {
+  async function completeSelectedTaskWithNodeMapping(useNodeMapping: boolean, useSdk = false, decision?: CompleteInput['decision']) {
     const task = selectedTask.value
     if (!task || completing.value || taskBusy(task.id)) return
     let variables: BusinessVariables = {}
@@ -515,7 +523,9 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     error.value = ''
     notice.value = ''
     try {
-      if (useNodeMapping) {
+      if (useSdk) {
+        await gateway.completeWithSdk!(task, { decision, variables: variables as Variables })
+      } else if (useNodeMapping) {
         await gateway.completeTaskByNode(taskId, { nodes: completeNodeVariables() })
       } else {
         await gateway.completeTask(taskId, variables)
@@ -533,6 +543,10 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
 
   function completeSelectedTask() {
     return completeSelectedTaskWithNodeMapping(false)
+  }
+
+  function completeSelectedTaskWithSdk(decision: 'agree' | 'reject') {
+    return completeSelectedTaskWithNodeMapping(false, true, decision)
   }
 
   function completeSelectedTaskByNode() {
@@ -567,7 +581,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     error.value = ''
     notice.value = ''
     try {
-      const result = await gateway.reassignTask(taskId, userId)
+      const result = await gateway.reassignTask(taskId, userId, task)
       reassignTargetTask.value = undefined
       reassignUserId.value = ''
       const loaded = await loadTasks()
@@ -588,7 +602,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     error.value = ''
     notice.value = ''
     try {
-      await gateway.refuseTask(taskId)
+      await gateway.refuseTask(taskId, task)
       const loaded = await loadTasks()
       notice.value = loaded ? '任务已退回待重派，需要指定新的办理人' : '任务已退回待重派，但任务列表刷新失败，请手动刷新'
     } catch (cause) {
@@ -633,7 +647,7 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
     startFieldErrors, startEventFieldErrors, completeFieldErrors, startFormConfigs, completeFormConfigs, selectedTaskTemplate,
     reassignUserId, error, notice,
     templateLoading, templateDetailLoading, templateMetadataLoading, templateDetail, templateDetailKey, templateDetailError, deletingTemplateKey, starting, taskLoading, completing, reassigning, taskFilter,
-    completeNodes, canStart, canStartByNode, startRequestPreview, startNodeRequestPreview, startFormSuggestionPreview, completeFormSuggestionPreview, completeRequestVariablesPreview, completeNodeRequestPreview, selectTemplate, loadTemplates, loadTemplateDetail, clearTemplateDetail, deleteTemplate, startSelectedTemplate, startSelectedTemplateByNode, setStartFormValues, setStartVariablesText,
-    loadTasks, openComplete, completeSelectedTask, completeSelectedTaskByNode, setCompleteFormValues, setCompleteVariablesText,
+    completeNodes, canStart, canStartByNode, startRequestPreview, startNodeRequestPreview, startFormSuggestionPreview, completeFormSuggestionPreview, completeRequestVariablesPreview, completeNodeRequestPreview, selectTemplate, loadTemplates, loadTemplateDetail, clearTemplateDetail, deleteTemplate, startSelectedTemplate, startSelectedTemplateByNode, startSelectedTemplateWithSdk, setStartFormValues, setStartVariablesText,
+    loadTasks, openComplete, completeSelectedTask, completeSelectedTaskByNode, completeSelectedTaskWithSdk, setCompleteFormValues, setCompleteVariablesText,
     openReassign, closeReassign, reassignSelectedTask, refuseTask, taskBusy, taskActionLoading, resetTaskFilters, dispose }
 }

@@ -158,7 +158,7 @@ async function save() {
   if (editingKey.value && signature === lastSavedModel) { ElMessage.info('内容没有变化，无需保存。'); return }
   saving.value = true
   try {
-    const content: WorkflowSubProcessDisplayJson = { processId: model.processId, processName: model.processName, nodes: model.nodes, flows: model.flows, width: model.width, height: model.height }
+    const content: WorkflowSubProcessDisplayJson = { processId: model.processId, processName: model.processName, ...(model.bizFormKey !== undefined ? { bizFormKey: model.bizFormKey } : {}), nodes: model.nodes, flows: model.flows, width: model.width, height: model.height }
     if (editingKey.value) {
       const saved = await subProcessLibraryGateway.update(editingKey.value, { name: editorName.value, description: editorDescription.value, displayJson: content })
       editorName.value = saved.name

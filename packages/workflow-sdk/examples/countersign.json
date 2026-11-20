@@ -1,9 +1,11 @@
 {
   "processId": "human_vote",
+  "processName": "投票会签",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "review",
@@ -11,11 +13,13 @@
       "approveMode": "VOTE",
       "passRate": "0.7",
       "sequential": false,
-      "allowAddSigner": false
+      "allowAddSigner": false,
+      "name": "经理投票会签"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

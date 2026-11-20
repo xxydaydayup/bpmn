@@ -1,29 +1,36 @@
 {
   "processId": "parallel_review",
+  "processName": "并行审批",
   "nodes": [
     {
       "id": "s",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "fork",
-      "type": "parallel"
+      "type": "parallel",
+      "name": "并行分流"
     },
     {
       "id": "a",
-      "type": "approval"
+      "type": "approval",
+      "name": "财务审批"
     },
     {
       "id": "b",
-      "type": "approval"
+      "type": "approval",
+      "name": "法务审批"
     },
     {
       "id": "join",
-      "type": "parallel"
+      "type": "parallel",
+      "name": "并行汇合"
     },
     {
       "id": "e",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

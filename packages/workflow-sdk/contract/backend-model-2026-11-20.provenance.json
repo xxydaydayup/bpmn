@@ -1,0 +1,20 @@
+{
+  "capturedAt": "2026-11-20T03:01:39.429Z",
+  "userDate": "2026-11-20",
+  "timezone": "Asia/Shanghai",
+  "scope": "Current contract for globally unique node/flow IDs, no subprocess prefixes; compile-only verification recorded separately.",
+  "sources": [
+    {
+      "source": "http://192.168.124.202:8085/bpmn/spec",
+      "snapshot": "backend-spec-2026-11-20.json",
+      "status": 200,
+      "sha256": "3a088b4fd47846816e5796559b933dfe1bb6fbbfc3936a4ac0f0a1edd6d9f018"
+    },
+    {
+      "source": "http://192.168.124.202:8085/bpmn/json-schema",
+      "snapshot": "backend-json-schema-2026-11-20.json",
+      "status": 200,
+      "sha256": "b0533e8205d65763d9d3bc3beee7c7d8321ffdd6f644c673dce1c7d928b21f54"
+    }
+  ]
+}

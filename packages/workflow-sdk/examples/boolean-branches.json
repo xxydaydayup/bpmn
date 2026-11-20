@@ -1,25 +1,36 @@
 {
   "processId": "boolean_branches",
+  "processName": "审批结果分支",
   "nodes": [
     {
       "id": "s",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "review",
-      "type": "approval"
+      "type": "approval",
+      "name": "申请审批"
     },
     {
       "id": "g",
-      "type": "condition"
+      "type": "condition",
+      "name": "审批结果判断"
     },
     {
       "id": "yes",
-      "type": "end"
+      "type": "approval",
+      "name": "通过后办理"
     },
     {
       "id": "no",
-      "type": "end"
+      "type": "approval",
+      "name": "驳回后处理"
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [
@@ -40,6 +51,14 @@
       "source": "g",
       "target": "no",
       "branch": "reject"
+    },
+    {
+      "source": "yes",
+      "target": "end"
+    },
+    {
+      "source": "no",
+      "target": "end"
     }
   ]
 }

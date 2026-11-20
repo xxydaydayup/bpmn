@@ -1,9 +1,11 @@
 {
   "processId": "nested_review",
+  "processName": "嵌套子流程审批",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "left",
@@ -11,12 +13,14 @@
       "process": {
         "nodes": [
           {
-            "id": "start",
-            "type": "start"
+            "id": "left_start",
+            "type": "start",
+            "name": "开始"
           },
           {
-            "id": "apply",
-            "type": "approval"
+            "id": "left_apply",
+            "type": "approval",
+            "name": "材料审批"
           },
           {
             "id": "inner",
@@ -24,64 +28,71 @@
             "process": {
               "nodes": [
                 {
-                  "id": "start",
-                  "type": "start"
+                  "id": "left_inner_start",
+                  "type": "start",
+                  "name": "开始"
                 },
                 {
-                  "id": "apply",
+                  "id": "left_inner_apply",
                   "type": "approval",
                   "x": 20,
                   "y": 80,
                   "reminder": {
                     "action": "return",
-                    "target": "revise"
-                  }
+                    "target": "left_inner_revise"
+                  },
+                  "name": "材料审批"
                 },
                 {
-                  "id": "revise",
-                  "type": "approval"
+                  "id": "left_inner_revise",
+                  "type": "approval",
+                  "name": "材料修订"
                 },
                 {
-                  "id": "end",
-                  "type": "end"
+                  "id": "left_inner_end",
+                  "type": "end",
+                  "name": "结束"
                 }
               ],
               "flows": [
                 {
-                  "source": "start",
-                  "target": "apply"
+                  "source": "left_inner_start",
+                  "target": "left_inner_apply"
                 },
                 {
-                  "source": "apply",
-                  "target": "revise"
+                  "source": "left_inner_apply",
+                  "target": "left_inner_revise"
                 },
                 {
-                  "source": "revise",
-                  "target": "end"
+                  "source": "left_inner_revise",
+                  "target": "left_inner_end"
                 }
               ]
-            }
+            },
+            "name": "内部审批子流程"
           },
           {
-            "id": "end",
-            "type": "end"
+            "id": "left_end",
+            "type": "end",
+            "name": "结束"
           }
         ],
         "flows": [
           {
-            "source": "start",
-            "target": "apply"
+            "source": "left_start",
+            "target": "left_apply"
           },
           {
-            "source": "apply",
+            "source": "left_apply",
             "target": "inner"
           },
           {
             "source": "inner",
-            "target": "end"
+            "target": "left_end"
           }
         ]
-      }
+      },
+      "name": "第一阶段审批"
     },
     {
       "id": "right",
@@ -89,81 +100,91 @@
       "process": {
         "nodes": [
           {
-            "id": "start",
-            "type": "start"
+            "id": "right_start",
+            "type": "start",
+            "name": "开始"
           },
           {
-            "id": "apply",
-            "type": "approval"
+            "id": "right_apply",
+            "type": "approval",
+            "name": "材料审批"
           },
           {
-            "id": "inner",
+            "id": "right_inner",
             "type": "subProcess",
             "process": {
               "nodes": [
                 {
-                  "id": "start",
-                  "type": "start"
+                  "id": "right_inner_start",
+                  "type": "start",
+                  "name": "开始"
                 },
                 {
-                  "id": "apply",
+                  "id": "right_inner_apply",
                   "type": "approval",
                   "x": 20,
                   "y": 80,
                   "reminder": {
                     "action": "return",
-                    "target": "revise"
-                  }
+                    "target": "right_inner_revise"
+                  },
+                  "name": "材料审批"
                 },
                 {
-                  "id": "revise",
-                  "type": "approval"
+                  "id": "right_inner_revise",
+                  "type": "approval",
+                  "name": "材料修订"
                 },
                 {
-                  "id": "end",
-                  "type": "end"
+                  "id": "right_inner_end",
+                  "type": "end",
+                  "name": "结束"
                 }
               ],
               "flows": [
                 {
-                  "source": "start",
-                  "target": "apply"
+                  "source": "right_inner_start",
+                  "target": "right_inner_apply"
                 },
                 {
-                  "source": "apply",
-                  "target": "revise"
+                  "source": "right_inner_apply",
+                  "target": "right_inner_revise"
                 },
                 {
-                  "source": "revise",
-                  "target": "end"
+                  "source": "right_inner_revise",
+                  "target": "right_inner_end"
                 }
               ]
-            }
+            },
+            "name": "内部审批子流程"
           },
           {
-            "id": "end",
-            "type": "end"
+            "id": "right_end",
+            "type": "end",
+            "name": "结束"
           }
         ],
         "flows": [
           {
-            "source": "start",
-            "target": "apply"
+            "source": "right_start",
+            "target": "right_apply"
           },
           {
-            "source": "apply",
-            "target": "inner"
+            "source": "right_apply",
+            "target": "right_inner"
           },
           {
-            "source": "inner",
-            "target": "end"
+            "source": "right_inner",
+            "target": "right_end"
           }
         ]
-      }
+      },
+      "name": "第二阶段审批"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

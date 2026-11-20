@@ -1,9 +1,11 @@
 {
   "processId": "serial_approval",
+  "processName": "申请审批",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "apply",
@@ -12,11 +14,13 @@
       "allowTransfer": false,
       "form": "legacy-form",
       "bizFormKey": "form:request@3",
-      "bizType": "request.review"
+      "bizType": "request.review",
+      "name": "申请审批"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

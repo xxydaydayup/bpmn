@@ -20,7 +20,7 @@ export interface PublishOptions extends OperationOptions {
 export interface WorkflowClientOptions { request: WorkflowRequester; timeoutMs?: number }
 export interface ParameterRule {
   name: string; fieldKey?: string; nodeId?: string; nodeName?: string; nodeType?: string;
-  type: string; source?: string; required?: boolean; value?: JsonValue; defaultValue?: JsonValue; description?: string
+  type: string; source?: string; required?: boolean; provided?: boolean; value?: JsonValue; defaultValue?: JsonValue; description?: string
 }
 export interface ParameterIssue { code: string; message: string; path?: string; variableName?: string; nodeId?: string }
 export interface TemplateSnapshot {

@@ -66,13 +66,13 @@ function protectPassed(rules: ParameterRule[], nodeId: string, nodeType: string)
   rules.push({ name, nodeId, nodeType, type: 'Boolean', source: 'engine', ...(personal ? { fieldKey: 'engineAggregate' } : {}) })
 }
 
-/** Match local nodes to backend activity IDs through exact rule names, never by splitting IDs. */
+/** Nested activities keep their globally unique node IDs in the runtime contract. */
 export function rulesWithModelProtection(rules: ParameterRule[], model?: WorkflowSubProcessModel | null): ParameterRule[] {
   const output = rules.map(rule => ({ ...rule }))
-  function visit(process: WorkflowSubProcessModel, prefix = '') {
+  function visit(process: WorkflowSubProcessModel) {
     if (!Array.isArray(process.nodes)) return
     for (const node of process.nodes) {
-      const activityId = prefix + node.id
+      const activityId = node.id
       const applicable = output.filter(rule => rule.nodeId === activityId)
       const fixed = new Map<string, unknown>([
         ['assignee', node.assignee], ['serviceName', node.serviceName], ['serviceUrl', node.serviceUrl],
@@ -90,7 +90,7 @@ export function rulesWithModelProtection(rules: ParameterRule[], model?: Workflo
         const name = `${activityId}_result`
         if (!output.some(rule => rule.name === name)) output.push({ name, nodeId: activityId, nodeType: node.type, type: 'Json', source: 'engine' })
       }
-      if (node.type === 'subProcess' && node.process) visit(node.process, activityId + '_')
+      if (node.type === 'subProcess' && node.process) visit(node.process)
     }
   }
   if (model) visit(model)
@@ -104,6 +104,14 @@ export function mapParameters(operation: string, input: { variables?: Variables;
     if (value === undefined) return
     if (Object.hasOwn(output, name)) parameterError(operation, 'PARAMETER_CONFLICT', `多个输入来源映射到变量 ${name}。`, path)
     const declared = allRules.filter(rule => rule.name === name)
+    // Multi-instance service outputs are indexed by the worker, so individual
+    // result names need protection even when the backend lists only the service.
+    const workerResult = allRules.some(rule => {
+      if (rule.nodeType !== 'service' || !rule.nodeId) return false
+      const prefix = `${rule.nodeId}_result_`
+      return name.startsWith(prefix) && /^[0-9]+$/.test(name.slice(prefix.length))
+    })
+    if (workerResult) parameterError(operation, 'PARAMETER_READ_ONLY', `变量 ${name} 由服务 worker 写入。`, path)
     if (declared.some(rule => stage(rule) === 'engine' || (rule.nodeType === 'service' && (rule.fieldKey === 'passed' || rule.name === `${rule.nodeId}_passed`)))) parameterError(operation, 'PARAMETER_READ_ONLY', `变量 ${name} 由引擎或模板写入。`, path)
     const permitted = declared.filter(rule => !allowed || allowed.has(stage(rule)))
     if (declared.length && !permitted.length) parameterError(operation, 'PARAMETER_STAGE', `变量 ${name} 不属于当前操作阶段。`, path)
@@ -136,6 +144,9 @@ export function mapParameters(operation: string, input: { variables?: Variables;
 export function checkRequired(variables: Variables, rules: ParameterRule[], operation: string) {
   for (const rule of uniqueRules(rules)) {
     if (!rule.required || stage(rule) === 'engine') continue
+    // Task rules may confirm start configuration already present in this instance.
+    // This never supplies a new personal opinion or excuses an explicit empty overwrite.
+    if (operation === 'complete' && stage(rule) === 'start' && rule.provided === true && !Object.hasOwn(variables, rule.name)) continue
     const value = Object.hasOwn(variables, rule.name) ? variables[rule.name] : rule.value ?? rule.defaultValue
     if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) parameterError(operation, 'PARAMETER_REQUIRED', `缺少参数 ${rule.name}。`, `/variables/${rule.name}`)
   }
@@ -182,6 +193,9 @@ export function completionVariables(task: TaskReference, input: CompleteInput, r
   function selectedRequirements(gateway?: NextGateway | null): ParameterRule[] {
     if (!gateway?.decisionVariable || gateway.decisionMode === 'expression') return []
     const variable = gateway.decisionVariable.name
+    // A countersigner's input is an individual opinion, never a prediction of
+    // the engine's ALL/ANY/VOTE result (including legacy aggregate rules).
+    if (gateway.decisionVariable.nodeType === 'countersign' || current.some(rule => rule.nodeType === 'countersign' && (!rule.nodeId || rule.nodeId === task.taskDefinitionKey))) return []
     // Legacy aggregates can select hints from the decision without being written.
     const value = Object.hasOwn(result, variable) ? result[variable] : gateway.decisionMode === 'boolean' && input.decision !== undefined ? input.decision === 'agree' : undefined
     if (value === undefined) return []
@@ -189,7 +203,10 @@ export function completionVariables(task: TaskReference, input: CompleteInput, r
     return branch ? [...branch.variables, ...selectedRequirements(branch.nextGateway)] : []
   }
   const gatewayRequired = req.gatewayDecision.filter(rule => !all.some(other => other.name === rule.name && stage(other) === 'engine'))
-  const required = [...current, ...gatewayRequired, ...selectedRequirements(req.nextGateway)].filter(rule => !all.some(other => other.name === rule.name && stage(other) === 'engine'))
+  // Branch selection may still be undecided, but an explicit empty value must
+  // never erase required configuration already supplied by another participant.
+  const explicitStart = all.filter(rule => stage(rule) === 'start' && Object.hasOwn(result, rule.name))
+  const required = [...current, ...gatewayRequired, ...selectedRequirements(req.nextGateway), ...explicitStart].filter(rule => !all.some(other => other.name === rule.name && stage(other) === 'engine'))
   checkRequired(result, required, operation)
   return result
 }

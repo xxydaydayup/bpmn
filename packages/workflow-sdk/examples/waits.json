@@ -1,28 +1,34 @@
 {
   "processId": "message_and_timer",
+  "processName": "消息与定时等待",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "ack",
       "type": "receive",
-      "messageName": "request.acknowledged"
+      "messageName": "request.acknowledged",
+      "name": "等待业务确认"
     },
     {
       "id": "delay",
       "type": "timer",
       "timerType": "duration",
-      "timerValue": "PT30M"
+      "timerValue": "PT30M",
+      "name": "等待三十分钟"
     },
     {
       "id": "runtime",
-      "type": "timer"
+      "type": "timer",
+      "name": "等待指定时长"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

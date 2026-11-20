@@ -1,26 +1,37 @@
 {
   "processId": "state_branches",
+  "processName": "业务状态分支",
   "nodes": [
     {
       "id": "s",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "g",
       "type": "condition",
-      "statusVariable": "business_status"
+      "statusVariable": "business_status",
+      "name": "业务状态判断"
     },
     {
       "id": "ok",
-      "type": "end"
+      "type": "approval",
+      "name": "受理审批"
     },
     {
       "id": "retry",
-      "type": "end"
+      "type": "approval",
+      "name": "补正处理"
     },
     {
       "id": "fallback",
-      "type": "end"
+      "type": "approval",
+      "name": "默认处理"
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [
@@ -42,6 +53,18 @@
       "source": "g",
       "target": "fallback",
       "branch": "default"
+    },
+    {
+      "source": "ok",
+      "target": "end"
+    },
+    {
+      "source": "retry",
+      "target": "end"
+    },
+    {
+      "source": "fallback",
+      "target": "end"
     }
   ]
 }

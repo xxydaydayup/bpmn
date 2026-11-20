@@ -11,11 +11,11 @@
       "process": {
         "nodes": [
           {
-            "id": "start",
+            "id": "left_start",
             "type": "start"
           },
           {
-            "id": "apply",
+            "id": "left_apply",
             "type": "approval"
           },
           {
@@ -24,61 +24,61 @@
             "process": {
               "nodes": [
                 {
-                  "id": "start",
+                  "id": "left_inner_start",
                   "type": "start"
                 },
                 {
-                  "id": "apply",
+                  "id": "left_inner_apply",
                   "type": "approval",
                   "x": 20,
                   "y": 80,
                   "reminder": {
                     "action": "return",
-                    "target": "revise"
+                    "target": "left_inner_revise"
                   }
                 },
                 {
-                  "id": "revise",
+                  "id": "left_inner_revise",
                   "type": "approval"
                 },
                 {
-                  "id": "end",
+                  "id": "left_inner_end",
                   "type": "end"
                 }
               ],
               "flows": [
                 {
-                  "source": "start",
-                  "target": "apply"
+                  "source": "left_inner_start",
+                  "target": "left_inner_apply"
                 },
                 {
-                  "source": "apply",
-                  "target": "revise"
+                  "source": "left_inner_apply",
+                  "target": "left_inner_revise"
                 },
                 {
-                  "source": "revise",
-                  "target": "end"
+                  "source": "left_inner_revise",
+                  "target": "left_inner_end"
                 }
               ]
             }
           },
           {
-            "id": "end",
+            "id": "left_end",
             "type": "end"
           }
         ],
         "flows": [
           {
-            "source": "start",
+            "source": "left_start",
             "target": "right"
           },
           {
-            "source": "apply",
+            "source": "left_apply",
             "target": "inner"
           },
           {
             "source": "inner",
-            "target": "end"
+            "target": "left_end"
           }
         ]
       }
@@ -89,74 +89,74 @@
       "process": {
         "nodes": [
           {
-            "id": "start",
+            "id": "right_start",
             "type": "start"
           },
           {
-            "id": "apply",
+            "id": "right_apply",
             "type": "approval"
           },
           {
-            "id": "inner",
+            "id": "right_inner",
             "type": "subProcess",
             "process": {
               "nodes": [
                 {
-                  "id": "start",
+                  "id": "right_inner_start",
                   "type": "start"
                 },
                 {
-                  "id": "apply",
+                  "id": "right_inner_apply",
                   "type": "approval",
                   "x": 20,
                   "y": 80,
                   "reminder": {
                     "action": "return",
-                    "target": "revise"
+                    "target": "right_inner_revise"
                   }
                 },
                 {
-                  "id": "revise",
+                  "id": "right_inner_revise",
                   "type": "approval"
                 },
                 {
-                  "id": "end",
+                  "id": "right_inner_end",
                   "type": "end"
                 }
               ],
               "flows": [
                 {
-                  "source": "start",
-                  "target": "apply"
+                  "source": "right_inner_start",
+                  "target": "right_inner_apply"
                 },
                 {
-                  "source": "apply",
-                  "target": "revise"
+                  "source": "right_inner_apply",
+                  "target": "right_inner_revise"
                 },
                 {
-                  "source": "revise",
-                  "target": "end"
+                  "source": "right_inner_revise",
+                  "target": "right_inner_end"
                 }
               ]
             }
           },
           {
-            "id": "end",
+            "id": "right_end",
             "type": "end"
           }
         ],
         "flows": [
           {
-            "source": "start",
-            "target": "apply"
+            "source": "right_start",
+            "target": "right_apply"
           },
           {
-            "source": "apply",
-            "target": "inner"
+            "source": "right_apply",
+            "target": "right_inner"
           },
           {
-            "source": "inner",
-            "target": "end"
+            "source": "right_inner",
+            "target": "right_end"
           }
         ]
       }

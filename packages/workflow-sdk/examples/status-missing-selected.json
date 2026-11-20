@@ -1,0 +1,18 @@
+{
+  "processId": "manual_status_missing_20261118",
+  "processName": "状态分支办理人校验",
+  "nodes": [
+    { "id": "start", "type": "start", "name": "开始", "x": 300, "y": 40 },
+    { "id": "route", "type": "condition", "name": "业务状态判断", "statusVariable": "state", "x": 300, "y": 160 },
+    { "id": "ready", "type": "approval", "name": "就绪状态审批", "x": 140, "y": 300 },
+    { "id": "fallback", "type": "approval", "name": "默认状态审批", "x": 460, "y": 300 },
+    { "id": "end", "type": "end", "name": "结束", "x": 300, "y": 460 }
+  ],
+  "flows": [
+    { "source": "start", "target": "route" },
+    { "source": "route", "target": "ready", "branch": "ready" },
+    { "source": "route", "target": "fallback", "branch": "default" },
+    { "source": "ready", "target": "end" },
+    { "source": "fallback", "target": "end" }
+  ]
+}

@@ -1,9 +1,11 @@
 {
   "processId": "timeout_actions",
+  "processName": "审批超时策略",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "apply",
@@ -11,7 +13,8 @@
       "reminder": {
         "duration": "PT1H",
         "action": "notify"
-      }
+      },
+      "name": "申请审批"
     },
     {
       "id": "review",
@@ -19,18 +22,21 @@
       "reminder": {
         "action": "return",
         "target": "apply"
-      }
+      },
+      "name": "复核审批"
     },
     {
       "id": "final",
       "type": "approval",
       "reminder": {
         "action": "end"
-      }
+      },
+      "name": "最终审批"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

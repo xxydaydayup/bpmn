@@ -33,12 +33,17 @@ const { runParallelWorkflow } = await import('@workflow/sdk/examples/parallel-cl
 const { runWaitWorkflow } = await import('@workflow/sdk/examples/wait-client.mjs')
 const { returnAndReassign } = await import('@workflow/sdk/examples/reassignment-client.mjs')
 const { runApprovalWorkflow } = await import('@workflow/sdk/examples/branch-client.mjs')
+const { runCountersignWorkflow } = await import('@workflow/sdk/examples/countersign-client.mjs')
+const { runSubprocessWorkflow, reusableSubprocessDefinition } = await import('@workflow/sdk/examples/subprocess-client.mjs')
 assert.equal(typeof runSerialWorkflow, 'function')
 assert.equal(typeof inspectWriteOutcome, 'function')
 assert.equal(typeof runParallelWorkflow, 'function')
 assert.equal(typeof runWaitWorkflow, 'function')
 assert.equal(typeof returnAndReassign, 'function')
 assert.equal(typeof runApprovalWorkflow, 'function')
+assert.equal(typeof runCountersignWorkflow, 'function')
+assert.equal(typeof runSubprocessWorkflow, 'function')
+assert.equal(sdk.validateWorkflowModel(reusableSubprocessDefinition('installed_reuse').toJSON()).valid, true)
 const definition = definitions.defineWorkflow({ key: 'installed' }, definitions.approval('review'))
 assert.equal(sdk.validateWorkflowModel(definition.toJSON()).valid, true)
 let requests = 0
@@ -80,6 +85,25 @@ const currentRuntime = clients.createWorkflowClient({ request: async input => {
 await currentRuntime.complete(installedTask, { decision: 'reject', fields: { checked: false } })
 assert.equal(passedWrites.length, 1)
 assert.deepEqual(passedWrites[0].body.variables, { checked: { value: false }, review_passed: { value: false } })
+const personal = { ...passedRule, name: 'sign_passed', nodeId: 'sign', nodeType: 'countersign' }
+const nextAssignee = { name: 'accepted_assignee', nodeId: 'accepted', nodeType: 'approval', source: 'start', type: 'String', required: true, provided: true }
+let signWrites = 0
+const signer = clients.createWorkflowClient({ request: async input => {
+  if (input.path.endsWith('/required-variables')) return { status: 200, body: { code: 'OK', data: { currentComplete: [personal], gatewayDecision: [personal], nextStartHints: [nextAssignee], nextGateway: { gatewayId: 'result', decisionMode: 'boolean', decisionVariable: personal, branches: [{ value: 'pass', decisionValue: true, variables: [nextAssignee] }] } } } }
+  signWrites++
+  return { status: 200, body: { code: 'OK', data: { taskId: 'task', status: 'completed' } } }
+} })
+const signTask = { ...installedTask, taskDefinitionKey: 'sign' }
+await signer.complete(signTask, { decision: 'agree' })
+for (const assignee of ['', null]) await assert.rejects(signer.complete(signTask, { decision: 'agree', nodes: { accepted: { assignee } } }), error => error.code === 'PARAMETER_REQUIRED' && error.effect === 'none')
+assert.equal(signWrites, 1)
+const serviceModel = definitions.defineWorkflow({ key: 'installed' }, definitions.subProcess('outer_box', definitions.service('invoke_step', { countersign: true }))).toJSON()
+const protectedService = clients.createWorkflowClient({ request: async input => {
+  if (input.path === '/template/installed') return { status: 200, body: { code: 'OK', data: { ...installedSnapshot, displayJson: serviceModel } } }
+  if (input.path.endsWith('/start-variables')) return { status: 200, body: { code: 'OK', data: [] } }
+  throw new Error('Worker-owned result must be rejected before a write')
+} })
+await assert.rejects(protectedService.start('installed', { businessKey: 'result-protection', variables: { invoke_step_result_0: false } }), error => error.code === 'PARAMETER_READ_ONLY' && error.effect === 'none')
 const lostWrites = clients.createWorkflowClient({ request: async input => {
   const ok = data => ({ status: 200, body: { code: 'OK', data } })
   if (input.path === '/bpmn/json2xml') return ok({ bpmnXml: '<definitions />' })
@@ -125,7 +149,7 @@ void wrong
 await writeFile(join(consumer, 'definition.ts'), `
 import { defineWorkflow, sequence, approval, subProcess } from '@workflow/sdk/definition'
 import type { WorkflowModel } from '@workflow/sdk'
-const definition = defineWorkflow({ key: 'offline' }, sequence(approval('review'), subProcess('nested', approval('review'))))
+const definition = defineWorkflow({ key: 'offline' }, sequence(approval('review'), subProcess('nested', approval('nested_review'))))
 const model: WorkflowModel = definition.toJSON()
 void model
 `)
@@ -141,7 +165,7 @@ await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({ compilerOption
 await writeFile(join(consumer, 'runtime.ts'), `
 import { defineWorkflow, sequence, approval, countersign, service, parallel, subProcess, timer } from '@workflow/sdk/definition'
 import { createWorkflowClient, type WorkflowRequester, type TaskReference } from '@workflow/sdk/client'
-const definition = defineWorkflow({ key: 'runtime' }, sequence(approval('review'), parallel('teams', [subProcess('finance', approval('review')), subProcess('legal', approval('review'))]), timer('wait', { timerType: 'duration', timerValue: 'PT1S' }), countersign('sign', { mode: 'VOTE', passRate: '.7' }), service('notify', { countersign: true, mode: 'ALL' })))
+const definition = defineWorkflow({ key: 'runtime' }, sequence(approval('review'), parallel('teams', [subProcess('finance', approval('finance_review')), subProcess('legal', approval('legal_review'))]), timer('wait', { timerType: 'duration', timerValue: 'PT1S' }), countersign('sign', { mode: 'VOTE', passRate: '.7' }), service('notify', { countersign: true, mode: 'ALL' })))
 const request: WorkflowRequester = async () => ({ status: 200, body: {} })
 const client = createWorkflowClient({ request })
 void client.publish(definition)
@@ -149,6 +173,12 @@ void client.publish(definition, { startable: true }) // deprecated compatibility
 const task: TaskReference = { id: 't', processInstanceId: 'p', processDefinitionId: 'd', taskDefinitionKey: 'review' }
 void client.compile(definition)
 void client.complete(task, { fields: { checked: false, amount: 0, nullable: null } })
+void countersign('sequential', { mode: 'ALL', sequential: true, allowAddSigner: false })
+void client.complete({ ...task, taskDefinitionKey: 'finance_review' }, { decision: 'reject', nodes: { archive: { assignee: 'next' } } })
+// @ts-expect-error VOTE ratios remain protocol strings
+countersign('wrong_rate', { mode: 'VOTE', passRate: 0.7 })
+// @ts-expect-error sequential must be Boolean
+countersign('wrong_order', { sequential: 'true' })
 // @ts-expect-error approval does not expose timer configuration
 approval('wrong', { timerValue: 'PT1S' })
 // @ts-expect-error service mode requires countersign=true

@@ -1,7 +1,7 @@
 import type { WorkflowFlow, WorkflowModel, WorkflowNode, WorkflowReminder, WorkflowSubProcessModel, WorkflowValidationIssue } from './types.js'
 import { toBpmnCompilerJson, WorkflowModelError } from './validation.js'
 
-/** Reserved within each local scope. Generated IDs are stable within an SDK version. */
+/** Reserved across the complete definition. Generated IDs are stable within an SDK version. */
 export const WORKFLOW_RESERVED_PREFIX = '__wf_'
 const bodyBrand: unique symbol = Symbol('WorkflowBody')
 type NodeKind = 'approval' | 'countersign' | 'service' | 'receive' | 'timer' | 'end'
@@ -127,16 +127,19 @@ export function subProcess(id: string, body: WorkflowBody, options: SubProcessOp
 }
 
 interface Fragment { entry: string; exits: string[]; earlyEnd: boolean }
-function compileScope(body: WorkflowBody, owner: string, scope: string[]): WorkflowSubProcessModel {
+function compileScope(body: WorkflowBody, owner: string, scope: string[], ids = new Set<string>()): WorkflowSubProcessModel {
   const nodes: WorkflowNode[] = []
   const flows: WorkflowFlow[] = []
-  const ids = new Set<string>()
   const add = (value: WorkflowNode) => {
-    if (ids.has(value.id)) fail('definition-duplicate-id', `同一作用域的标识重复：${value.id}。`, '/id', scope)
+    if (ids.has(value.id)) fail('definition-duplicate-id', `整个流程的标识重复：${value.id}。`, '/id', scope)
     ids.add(value.id); nodes.push(value)
     return value.id
   }
-  const generated = (suffix: string) => `${WORKFLOW_RESERVED_PREFIX}${owner}_${suffix}`
+  const encode = (part: string) => {
+    const encoded = Array.from(part, character => /^[A-Za-z0-9]$/.test(character) ? character : `_x${character.codePointAt(0)!.toString(16)}_`).join('')
+    return `${encoded.length}_${encoded}`
+  }
+  const generated = (suffix: string, localId?: string) => `${WORKFLOW_RESERVED_PREFIX}${[owner, ...scope, ...(localId === undefined ? [] : [localId])].map(encode).join('_')}_${suffix}`
   const connect = (source: string, target: string, fields: Partial<WorkflowFlow> = {}) => {
     const id = generated(`flow_${flows.length}`)
     if (ids.has(id)) fail('definition-duplicate-id', `生成标识冲突：${id}。`, '/flows', scope)
@@ -152,8 +155,9 @@ function compileScope(body: WorkflowBody, owner: string, scope: string[]): Workf
         return { entry: value.node.id, exits: value.node.type === 'end' ? [] : [value.node.id], earlyEnd: value.node.type === 'end' }
       }
       case 'subProcess': {
-        const process = compileScope(value.body, value.id, [...scope, value.id])
-        add({ id: value.id, type: 'subProcess', ...value.options, process })
+        const container: WorkflowNode = { id: value.id, type: 'subProcess', ...value.options }
+        add(container)
+        container.process = compileScope(value.body, owner, [...scope, value.id], ids)
         return { entry: value.id, exits: [value.id], earlyEnd: false }
       }
       case 'sequence': {
@@ -176,7 +180,7 @@ function compileScope(body: WorkflowBody, owner: string, scope: string[]): Workf
           exits.push(...fragment.exits); earlyEnd ||= fragment.earlyEnd
         }
         if (exits.length > 1) {
-          const join = `${WORKFLOW_RESERVED_PREFIX}${value.id}_merge`
+          const join = generated('merge', value.id)
           add({ id: join, type: 'condition' })
           exits.forEach(source => connect(source, join))
           return { entry: value.id, exits: [join], earlyEnd }
@@ -185,7 +189,7 @@ function compileScope(body: WorkflowBody, owner: string, scope: string[]): Workf
       }
       case 'parallel': {
         add({ id: value.id, type: 'parallel' })
-        const join = `${WORKFLOW_RESERVED_PREFIX}${value.id}_join`
+        const join = generated('join', value.id)
         const branches = value.children.map(visit)
         if (branches.some(branch => branch.earlyEnd || !branch.exits.length)) fail('definition-parallel-end', '并行体每条路径都必须到达 join，不能提前 end；子流程内部的正常结束不受限制。', '/body', scope)
         add({ id: join, type: 'parallel' })

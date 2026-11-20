@@ -1,17 +1,21 @@
 {
   "processId": "single_service",
+  "processName": "单服务调用",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "check",
-      "type": "service"
+      "type": "service",
+      "name": "业务服务校验"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

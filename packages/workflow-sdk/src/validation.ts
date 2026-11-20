@@ -104,15 +104,10 @@ function validateFlows(rawNodes: unknown[], rawFlows: unknown[], base: string, s
   const nodes = nodeEntries.map(({ node }) => node)
   const flows = flowEntries.map(({ flow }) => flow)
   const byId = new Map(nodes.map(node => [node.id, node]))
-  const ids = new Set<string>()
   flowEntries.forEach(({ flow, index }) => {
     const path = `${base}/flows/${index}`
     const context = { edgeId: typeof flow.id === 'string' ? flow.id : undefined, scope }
     const add: Report = (code, message, field, extra) => report(code, message, field, { ...context, ...extra })
-    if (typeof flow.id === 'string') {
-      if (ids.has(flow.id)) add('duplicate-flow-id', '同层连线标识重复。', `${path}/id`)
-      ids.add(flow.id)
-    }
     for (const key of ['source', 'target']) if (typeof flow[key] === 'string' && !byId.has(flow[key])) add('flow-reference', '连线只能引用当前层已存在的节点，不能跨越子流程。', `${path}/${key}`)
     const source = byId.get(flow.source)
     if (!source) return
@@ -151,29 +146,44 @@ export function validateWorkflowModel(input: unknown): WorkflowValidationResult 
   const issues: WorkflowValidationIssue[] = []
   const report: Report = (code, message, path, context) => issues.push({ code, severity: 'error', message, path, ...context })
   validateStructure(input, report)
-  // Structure checking stops cycles. Avoid traversing malformed/cyclic process
-  // objects again, while still reporting independent well-formed semantics.
-  const seen = new Set<object>()
-  const stack = [{ value: input, base: '', scope: [] as string[] }]
+  // Every occurrence contributes definitions; only ancestor cycles stop traversal.
+  const ancestors = new Set<object>()
+  const ids = new Map<string, 'node' | 'flow'>()
+  const register = (id: unknown, kind: 'node' | 'flow', path: string, context: Partial<WorkflowValidationIssue>) => {
+    if (typeof id !== 'string') return
+    const previous = ids.get(id)
+    if (previous) report(previous === kind ? `duplicate-${kind}-id` : 'duplicate-definition-id', '节点与显式连线标识必须在整个流程中唯一。', path, context)
+    else ids.set(id, kind)
+  }
+  type Work = { value: unknown; base: string; scope: string[]; leave?: boolean }
+  const stack: Work[] = [{ value: input, base: '', scope: [] }]
   while (stack.length) {
-    const { value, base, scope } = stack.pop()!
-    if (!record(value) || seen.has(value)) continue
-    seen.add(value)
-    if (!Array.isArray(value.nodes)) continue
-    const nodes = value.nodes.filter(record)
-    const ids = new Set<string>()
-    for (const [index, node] of value.nodes.entries()) {
+    const current = stack.pop()!
+    const { value, base, scope } = current
+    if (!record(value)) continue
+    if (current.leave) { ancestors.delete(value); continue }
+    if (ancestors.has(value)) continue
+    ancestors.add(value)
+    stack.push({ ...current, leave: true })
+    const rawNodes = Array.isArray(value.nodes) ? value.nodes : []
+    const nodes = rawNodes.filter(record)
+    const children: Work[] = []
+    for (const [index, node] of rawNodes.entries()) {
       if (!record(node)) continue
       const path = `${base}/nodes/${index}`
       const context = { nodeId: typeof node.id === 'string' ? node.id : undefined, scope }
-      if (typeof node.id === 'string') {
-        if (ids.has(node.id)) report('duplicate-node-id', '同层节点标识重复。', `${path}/id`, context)
-        ids.add(node.id)
-      }
+      register(node.id, 'node', `${path}/id`, context)
       validateNode(node, nodes, path, (code, message, field, extra) => report(code, message, field, { ...context, ...extra }))
-      if (node.type === 'subProcess' && record(node.process)) stack.push({ value: node.process, base: `${path}/process`, scope: [...scope, String(node.id)] })
+      if (node.type === 'subProcess' && record(node.process)) children.push({ value: node.process, base: `${path}/process`, scope: [...scope, String(node.id)] })
     }
-    if (Array.isArray(value.flows)) validateFlows(value.nodes, value.flows, base, scope, report)
+    if (Array.isArray(value.flows)) {
+      value.flows.forEach((flow, index) => {
+        if (record(flow)) register(flow.id, 'flow', `${base}/flows/${index}/id`, { edgeId: typeof flow.id === 'string' ? flow.id : undefined, scope })
+      })
+      // Missing flow IDs are generated and disambiguated by the backend.
+      validateFlows(rawNodes, value.flows, base, scope, report)
+    }
+    stack.push(...children.reverse())
   }
   return { valid: !issues.some(issue => issue.severity === 'error'), issues }
 }

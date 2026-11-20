@@ -1,0 +1,115 @@
+{
+  "capturedAt": "2026-11-18T07:55:38.930Z",
+  "source": "http://192.168.124.202:9000/swagger/doc.json",
+  "sourceSha256": "a8f47edba155156939d8aed3527d9a700b61c41a4a09ac7f86189b43979f0798",
+  "scope": "Template publish multipart contract. Complete original Swagger retained in local verification; no model-schema baseline change.",
+  "path": "/api/v1/template",
+  "post": {
+    "security": [
+      {
+        "BasicAuth": []
+      }
+    ],
+    "description": "与 /api/v1/deployments 一致（对齐 Camunda POST /deployment/create）：multipart 上传 BPMN / DMN / CMMN 文件，\n部署成功后自动落一条业务模板到 biz_template 表。\n\n模板字段大部分由部署结果自动填充，业务侧无需显式传参：\n- templateKey / templateName / category / version 取自本次部署的流程定义；\n- globalVariables 可留空：传了 display-json 时后端自动从流程设计 JSON 推导（同名时业务侧优先）；\n- tenantId 由 Basic Auth 自动注入。\n同一 (tenant, templateKey) 重复部署即覆盖（版本号、变量定义刷新到最新）。",
+    "consumes": [
+      "multipart/form-data"
+    ],
+    "produces": [
+      "application/json"
+    ],
+    "tags": [
+      "模板"
+    ],
+    "summary": "创建/覆盖模板（部署 BPMN + 落库）",
+    "parameters": [
+      {
+        "type": "string",
+        "example": "approval-leave",
+        "description": "部署名（缺省取流程定义 name）",
+        "name": "deployment-name",
+        "in": "formData"
+      },
+      {
+        "type": "file",
+        "description": "BPMN / DMN / CMMN 文件（part 名与文件名一致，可传多个）",
+        "name": "file",
+        "in": "formData",
+        "required": true
+      },
+      {
+        "type": "string",
+        "description": "业务唯一标识（缺省取流程定义 key）",
+        "name": "template-key",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "模板名称（缺省取流程定义 name）",
+        "name": "template-name",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "分类（缺省取流程定义 category）",
+        "name": "category",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "描述",
+        "name": "description",
+        "in": "formData"
+      },
+      {
+        "type": "boolean",
+        "description": "true/false（缺省 false）",
+        "name": "suspended",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "JSON 数组字符串，描述发起实例需传的变量（可省略，由 display-json 自动推导）",
+        "name": "global-variables",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "JSON 对象字符串，业务扩展",
+        "name": "extra",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "JSON 对象字符串，流程设计 JSON（设计器画布，简化格式），用于推导 global-variables 并回显画布",
+        "name": "display-json",
+        "in": "formData"
+      },
+      {
+        "type": "string",
+        "description": "创建人",
+        "name": "created-by",
+        "in": "formData"
+      }
+    ],
+    "responses": {
+      "201": {
+        "description": "创建成功",
+        "schema": {
+          "$ref": "#/definitions/ht-go-camunda_pkg_response.Response-ht-go-camunda_internal_model_BizTemplate"
+        }
+      },
+      "400": {
+        "description": "参数错误（如缺少文件、multipart 解析失败、JSON 字段非法）",
+        "schema": {
+          "$ref": "#/definitions/ht-go-camunda_pkg_response.Response-any"
+        }
+      },
+      "500": {
+        "description": "内部错误（下游引擎异常等），code 固定 INTERNAL_ERROR",
+        "schema": {
+          "$ref": "#/definitions/ht-go-camunda_pkg_response.Response-any"
+        }
+      }
+    }
+  }
+}

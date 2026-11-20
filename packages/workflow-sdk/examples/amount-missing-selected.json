@@ -1,0 +1,18 @@
+{
+  "processId": "manual_amount_missing_20261118",
+  "processName": "金额分支办理人校验",
+  "nodes": [
+    { "id": "start", "type": "start", "name": "开始", "x": 300, "y": 40 },
+    { "id": "route", "type": "condition", "name": "申请金额判断", "x": 300, "y": 160 },
+    { "id": "high", "type": "approval", "name": "大额审批", "x": 140, "y": 300 },
+    { "id": "low", "type": "approval", "name": "普通金额审批", "x": 460, "y": 300 },
+    { "id": "end", "type": "end", "name": "结束", "x": 300, "y": 460 }
+  ],
+  "flows": [
+    { "source": "start", "target": "route" },
+    { "source": "route", "target": "high", "conditionExpression": "${amount > 100}" },
+    { "source": "route", "target": "low", "branch": "default" },
+    { "source": "high", "target": "end" },
+    { "source": "low", "target": "end" }
+  ]
+}

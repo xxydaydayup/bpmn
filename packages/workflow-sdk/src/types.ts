@@ -25,6 +25,7 @@ export interface WorkflowNode {
   bizFormKey?: string
   assignee?: string
   statusVariable?: string
+  result?: string
   messageName?: string
   timerType?: WorkflowTimerType
   timerValue?: string
@@ -47,13 +48,11 @@ export interface WorkflowFlow {
   conditionExpression?: string
 }
 export interface WorkflowSubProcessModel {
-  processId?: string
-  processName?: string
-  bizFormKey?: string
   nodes: WorkflowNode[]
   flows?: WorkflowFlow[]
+  bizFormKey?: string
 }
-export interface WorkflowModel extends WorkflowSubProcessModel { processId: string }
+export interface WorkflowModel extends WorkflowSubProcessModel { processId: string; processName?: string }
 export type WorkflowNodeRecord = WorkflowNode
 export type WorkflowFlowRecord = WorkflowFlow
 export interface WorkflowValidationIssue {

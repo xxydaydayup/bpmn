@@ -1,20 +1,24 @@
 {
   "processId": "service_vote",
+  "processName": "多服务会签",
   "nodes": [
     {
       "id": "start",
-      "type": "start"
+      "type": "start",
+      "name": "开始"
     },
     {
       "id": "check",
       "type": "service",
       "countersign": true,
       "approveMode": "ANY",
-      "sequential": false
+      "sequential": false,
+      "name": "服务会签校验"
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "name": "结束"
     }
   ],
   "flows": [

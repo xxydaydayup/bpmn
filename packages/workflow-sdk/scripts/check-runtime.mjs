@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
 import { createWorkflowClient } from '@workflow/sdk/client'
 import * as d from '@workflow/sdk/definition'
 import { createFetchRequest } from '../examples/fetch-request.mjs'
+import { checkApprovalAndSubprocess } from './runtime-approval-subprocess.mjs'
+import { checkTimeouts } from './runtime-timeouts.mjs'
 
 const base = process.env.WORKFLOW_SMOKE_BASE_URL ?? 'http://localhost:5171'
 const tenant = process.env.WORKFLOW_SMOKE_TENANT ?? 'tenant-a'
@@ -13,7 +15,7 @@ const prefix = 'sdk_' + randomUUID().replaceAll('-', '')
 const directory = resolve(process.env.WORKFLOW_SMOKE_REPORT_DIR ?? '.scratch/workflow-function-sdk/verification')
 const fetchRequest = createFetchRequest(base + '/api/v1')
 const request = async input => {
-  const tracked = /start-variables|required-variables|[/]complete$|[/]instances[/]start$/.test(input.path)
+  const tracked = /start-variables|required-variables|[/](complete|refuse|reassign|messages)$|[/]instances[/]start$/.test(input.path)
   const entry = tracked ? { method: input.method, path: input.path, query: input.query, body: input.body } : undefined
   if (entry) report.requests.push(entry)
   const response = await fetchRequest(input)
@@ -21,7 +23,7 @@ const request = async input => {
   return response
 }
 const sdk = createWorkflowClient({ request, timeoutMs: 20000 })
-const report = { date: new Date().toISOString(), sdkVersion: '0.2.0', base, tenant, prefix, environment: {}, requests: [], scenarios: [], resources: [], cleanup: [] }
+const report = { date: new Date().toISOString(), sdkVersion: '0.2.0', base, tenant, prefix, environment: {}, ...(process.env.WORKFLOW_SMOKE_PACKAGE_SHA ? { installedPackageSha256: process.env.WORKFLOW_SMOKE_PACKAGE_SHA } : {}), requests: [], scenarios: [], resources: [], cleanup: [] }
 const keep = process.argv.includes('--keep')
 const selected = process.env.WORKFLOW_SMOKE_SCENARIOS?.split(',')
 const delay = ms => new Promise(done => setTimeout(done, ms))
@@ -85,6 +87,13 @@ async function finish(instance, expectedNodes = [], state = 'COMPLETED') {
     if (state === 'COMPLETED') assert.ok(history.some(item => item.activityType === 'serviceTask' && item.endTime), 'task_finish worker must actually finish')
   return { progress, engine, taskIds: history.filter(item => item.taskId).map(item => item.taskId), path: history.map(item => ({ id: item.id, activityId: item.activityId, endTime: item.endTime, canceled: item.canceled })) }
 }
+function parallelJoinBefore(model, target) {
+  const joins = model.nodes.filter(node => node.type === 'parallel'
+    && model.flows.some(flow => flow.source === node.id && flow.target === target)
+    && model.flows.filter(flow => flow.target === node.id).length > 1)
+  assert.equal(joins.length, 1, 'Expected one parallel join before ' + target)
+  return joins[0].id
+}
 async function scenario(name, run) {
   if (selected && !selected.includes(name)) return
   const entry = { name, startedAt: new Date().toISOString() }; report.scenarios.push(entry)
@@ -96,6 +105,8 @@ try {
   const current = await raw('GET', '/api/v1/template?maxResults=1')
   assert.equal(current.code, 'OK'); assert.ok(!current.data?.length || current.data[0].tenantId === tenant)
   report.environment.gateway = 'existing authenticated development proxy; build version not exposed'
+  await checkApprovalAndSubprocess({ sdk, scenario, publish, start, tasks, taskAt, finish, raw, report, request })
+  await checkTimeouts({ sdk, scenario, publish, start, tasks, taskAt, finish, raw, report, until })
   await scenario('compiler-recheck', async () => {
     const bodies = [
       ['reject', d.sequence(d.approval('review'), d.choice('result', { branches: [{ branch: 'pass', body: d.approval('accepted') }, { branch: 'reject', body: d.end('rejected') }] }))],
@@ -285,12 +296,10 @@ try {
       const requirements = await sdk.getStartRequirements(template.templateKey, variables)
       const entry = { state, expected, requirements }; evidence.push(entry)
       try {
-      await assert.rejects(sdk.start(template.templateKey, { businessKey: template.templateKey + '_missing_' + state, variables }), error => {
-        entry.missingSelected = { code: error.code, message: error.message, effect: error.effect, httpStatus: error.httpStatus, issues: error.issues }
-        assert.equal(error.effect, 'none'); assert.ok(['VARIABLE_VALIDATION_FAILED', 'PARAMETER_REQUIRED'].includes(error.code)); return true
-      })
       const instance = await start(template, { [expected]: { assignee: 'sdk-status' } }, variables, '_' + state)
       const task = await taskAt(instance, expected)
+      entry.task = task
+      assert.equal(task.assignee, 'sdk-status')
       assert.equal((await tasks(instance)).length, 1)
       await sdk.complete(task, {}, { templateSnapshot: template })
       Object.assign(entry, await finish(instance, [expected]))
@@ -309,12 +318,36 @@ try {
       try {
         const instance = await start(template, { [expected]: { assignee: 'sdk-amount' } }, { amount }, '_' + amount)
         const task = await taskAt(instance, expected); assert.equal(task.assignee, 'sdk-amount')
+        entry.task = task
         await sdk.complete(task, {}, { templateSnapshot: template })
         Object.assign(entry, await finish(instance, [expected]))
         assert.ok(!entry.path.some(item => item.activityId === (expected === 'large' ? 'small' : 'large')))
       } catch (error) { entry.failure = { code: error.code, httpStatus: error.httpStatus, message: error.message, phase: error.phase, effect: error.effect, resources: error.resources } }
     }
     assert.ok(evidence.every(entry => !entry.failure), 'Expression branch failed: ' + JSON.stringify(evidence.filter(entry => entry.failure).map(entry => ({ amount: entry.amount, ...entry.failure }))))
+    return evidence
+  })
+  for (const kind of ['status', 'amount']) await scenario(kind + '-missing-selected', async () => {
+    const body = kind === 'status'
+      ? d.choice('route', { statusVariable: 'state', branches: [{ branch: 'ready', body: d.approval('ready') }, { branch: 'default', body: d.approval('fallback') }] })
+      : d.choice('route', { branches: [{ conditionExpression: '${amount > 100}', body: d.approval('large') }, { branch: 'default', body: d.approval('small') }] })
+    const template = await publish(kind + '_missing', body)
+    const evidence = []; report.scenarios.at(-1).evidence = evidence
+    for (const variables of kind === 'status' ? [{ state: 'ready' }, { state: 'unknown' }] : [{ amount: 101 }, { amount: 0 }]) {
+      const businessKey = template.templateKey + '_' + Object.values(variables)[0]
+      const entry = { variables, businessKey }; evidence.push(entry)
+      try { await sdk.start(template.templateKey, { businessKey, variables }); entry.unexpectedSuccess = true } catch (error) {
+        entry.error = { code: error.code, message: error.message, effect: error.effect, httpStatus: error.httpStatus, resources: error.resources }
+      }
+      entry.instances = await raw('GET', '/api/camunda/process-instance?processDefinitionId=' + encodeURIComponent(template.processDefinitionId) + '&businessKey=' + encodeURIComponent(businessKey))
+    }
+    for (const entry of evidence) {
+      assert.ok(entry.error && entry.instances.length === 0, 'Missing selected assignee must reject startup without a runtime instance')
+      const validation = entry.error.effect === 'none' && ['VARIABLE_VALIDATION_FAILED', 'PARAMETER_REQUIRED'].includes(entry.error.code)
+      const accepted = kind === 'status' && entry.error.httpStatus === 500 && entry.error.code === 'INTERNAL_ERROR' && entry.error.effect === 'unknown'
+      assert.ok(validation || accepted, 'Unexpected rejection: ' + JSON.stringify(entry))
+      if (accepted) entry.acceptedDiscrepancy = { decision: 'User accepted error rejection on 2026-11-18', backendOptimization: 'Return 400 and improve selected-assignee validation', fixed: false }
+    }
     return evidence
   })
   await scenario('status-fixed-default', async () => {
@@ -359,23 +392,23 @@ try {
     await sdk.complete(initial.find(t => t.taskDefinitionKey === 'finance'))
     assert.deepEqual((await tasks(instance)).map(t => t.taskDefinitionKey), ['legal'])
     await sdk.complete(await taskAt(instance, 'legal')); await sdk.complete(await taskAt(instance, 'archive'))
-    return finish(instance, ['finance', 'legal', '__wf_departments_join', 'archive'])
+    return finish(instance, ['finance', 'legal', parallelJoinBefore(template.displayJson, 'archive'), 'archive'])
   })
   await scenario('message-timer-subprocess', async () => {
-    const local = () => d.approval('review')
-    const template = await publish('nested', d.sequence(d.subProcess('outer', d.subProcess('inner', local())), d.subProcess('other', local()), d.receive('receipt', { messageName: prefix + '_received' }), d.timer('cooldown', { timerType: 'duration', timerValue: 'PT2S' }), d.approval('archive', {})))
+    const local = id => d.approval(id)
+    const template = await publish('nested', d.sequence(d.subProcess('outer', d.subProcess('inner', local('outer_inner_review'))), d.subProcess('other', local('other_review')), d.receive('receipt', { messageName: prefix + '_received' }), d.timer('cooldown', { timerType: 'duration', timerValue: 'PT2S' }), d.approval('archive', {})))
     const rules = await sdk.getStartRequirements(template.templateKey)
     const assignees = rules.rules.filter(rule => rule.name.endsWith('_assignee') && rule.source === 'start' && rule.required)
     const nodes = Object.fromEntries(assignees.map(rule => [rule.nodeId, { assignee: 'sdk_' + rule.nodeId }]))
     const instance = await start(template, nodes)
     const keys = []
     for (let i = 0; i < 2; i++) { const task = (await tasks(instance))[0]; assert.ok(task.taskDefinitionKey.endsWith('_review')); keys.push(task.taskDefinitionKey); assert.equal(task.assignee, 'sdk_' + task.taskDefinitionKey); await sdk.complete(task) }
-    assert.notEqual(keys[0], keys[1])
+    assert.deepEqual(keys, ['outer_inner_review', 'other_review'])
     assert.equal((await tasks(instance)).length, 0)
     const waiting = await sdk.getProgress(instance.processInstanceId); assert.equal(waiting.state, 'ACTIVE'); assert.ok(waiting.activeNodes.some(n => n.activityId === 'receipt'))
     await sdk.sendMessage({ businessKey: instance.businessKey, messageName: prefix + '_received', variables: { received: true } })
     await sdk.complete(await taskAt(instance, 'archive'))
-    return { expandedIds: keys, ...(await finish(instance, [...keys, 'receipt', 'cooldown', 'archive'])) }
+    return { activityIds: keys, ...(await finish(instance, [...keys, 'receipt', 'cooldown', 'archive'])) }
   })
   await scenario('nested-parallel', async () => {
     const template = await publish('nested_parallel', d.sequence(d.parallel('outer', [
@@ -394,7 +427,7 @@ try {
       assert.equal(task.assignee, 'sdk-' + node)
       await sdk.complete(task, { fields: { comment: node } }, { templateSnapshot: template })
     }
-    return { observations, ...(await finish(instance, ['finance', 'legal', '__wf_inner_join', 'manager', 'audit', '__wf_outer_join', 'archive'])) }
+    return { observations, ...(await finish(instance, ['finance', 'legal', parallelJoinBefore(template.displayJson, 'manager'), 'manager', 'audit', parallelJoinBefore(template.displayJson, 'archive'), 'archive'])) }
   })
   await scenario('installed-parallel-consumer', async () => {
     const installedRoot = process.env.WORKFLOW_SMOKE_INSTALLED_ROOT
@@ -419,7 +452,7 @@ try {
       return response
     } })
     assert.equal(result.progress.state, 'COMPLETED')
-    return { consumer: installedRoot, artifact, artifactSha256, observed, observations: result.observations, ...(await finish(result.instance, ['finance', 'legal', '__wf_inner_join', 'manager', 'audit', '__wf_outer_join', 'archive'])) }
+    return { consumer: installedRoot, artifact, artifactSha256, observed, observations: result.observations, ...(await finish(result.instance, ['finance', 'legal', parallelJoinBefore(result.template.displayJson, 'manager'), 'manager', 'audit', parallelJoinBefore(result.template.displayJson, 'archive'), 'archive'])) }
   })
   for (const decision of ['agree', 'reject']) await scenario('installed-approval-' + decision, async () => {
     const installedRoot = process.env.WORKFLOW_SMOKE_INSTALLED_ROOT
@@ -505,6 +538,15 @@ try {
     const instance = await start(template, { wait: { timerValue: 'PT2S' } })
     await sdk.complete(await taskAt(instance, 'archive'), {}, { templateSnapshot: template })
     return { requirements, failure, ...(await finish(instance, ['wait', 'archive'])) }
+  })
+  for (const timerType of ['duration', 'date', 'cycle']) await scenario('timer-only-' + timerType, async () => {
+    const timerValue = timerType === 'date' ? new Date(Date.now() + 6000).toISOString() : timerType === 'cycle' ? 'R1/PT3S' : 'PT3S'
+    const template = await publish('timer_only_' + timerType, d.timer('wait', { timerType, timerValue }))
+    const instance = await start(template)
+    const before = await sdk.getProgress(instance.processInstanceId)
+    assert.equal(before.state, 'ACTIVE'); assert.ok(before.activeNodes.some(node => node.activityId === 'wait'))
+    assert.equal((await tasks(instance)).length, 0)
+    return { timerType, timerValue, before, ...(await finish(instance, ['wait'])) }
   })
   await scenario('message-ambiguity', async () => {
     const messageName = prefix + '_ambiguous'

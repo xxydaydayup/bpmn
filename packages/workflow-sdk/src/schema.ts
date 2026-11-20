@@ -31,13 +31,13 @@ export const workflowModelSchema = {
   type: 'object', additionalProperties: false, required: ['processId', 'nodes'],
   properties: { ...processProperties, processId: identifier },
   $defs: {
-    process: { type: 'object', additionalProperties: false, required: ['nodes'], properties: processProperties },
+    process: { type: 'object', additionalProperties: false, required: ['nodes'], properties: { nodes: processProperties.nodes!, flows: processProperties.flows!, bizFormKey: string } },
     node: {
       type: 'object', additionalProperties: false, required: ['id', 'type'],
       properties: {
         id: identifier, type: { enum: [...WORKFLOW_NODE_TYPES, ...LEGACY_WORKFLOW_NODE_TYPES] },
         name: string, x: { type: 'integer' }, y: { type: 'integer' }, width: { type: 'integer' }, height: { type: 'integer' },
-        bizType: string, bizJson: string, form: string, bizFormKey: string, assignee: string, statusVariable: string,
+        bizType: string, bizJson: string, form: string, bizFormKey: string, assignee: string, statusVariable: string, result: string,
         messageName: string, timerType: { enum: ['duration', 'date', 'cycle'] }, timerValue: string,
         serviceName: string, serviceUrl: string, countersign: boolean,
         approveMode: { enum: ['ALL', 'ANY', 'VOTE'] }, passRate: string, sequential: boolean,

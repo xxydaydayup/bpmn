@@ -26,6 +26,7 @@ export type WorkflowNodeRecord = Omit<StandardNode, 'type' | 'name' | 'x' | 'y' 
   process?: WorkflowSubProcessModel
   subProcessKey?: string
   subProcessName?: string
+  subProcessSourceJson?: string
   statusVariable?: string
   allowTransfer?: boolean
   allowAddSigner?: boolean

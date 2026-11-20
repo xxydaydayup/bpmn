@@ -20,6 +20,7 @@ function createProcessSnapshot(displayJson: WorkflowSubProcessFragment['displayJ
   return JSON.parse(JSON.stringify({
     ...(displayJson.processId !== undefined ? { processId: displayJson.processId } : {}),
     ...(displayJson.processName !== undefined ? { processName: displayJson.processName } : {}),
+    ...(displayJson.bizFormKey !== undefined ? { bizFormKey: displayJson.bizFormKey } : {}),
     nodes: displayJson.nodes,
     ...(Array.isArray(displayJson.flows) ? { flows: displayJson.flows } : {}),
   })) as NonNullable<typeof props.model.process>
@@ -61,7 +62,8 @@ async function choose(key: string) {
       return
     }
     props.beginEdit()
-    props.update('subProcessSelection', { key: detail.key, name: detail.name, process: createProcessSnapshot(detail.displayJson) })
+    const process = createProcessSnapshot(detail.displayJson)
+    props.update('subProcessSelection', { key: detail.key, name: detail.name, process, sourceJson: JSON.stringify(process) })
   } catch (cause) {
     if (generation !== requestGeneration) return
     selectedOption.value = selectedKey.value
@@ -79,12 +81,14 @@ async function refresh() {
   try {
     const detail = await props.subprocessFragments.get(selectedKey.value)
     if (generation !== requestGeneration) return
-    const updated = JSON.stringify(createProcessSnapshot(detail.displayJson)) !== JSON.stringify(snapshot.value)
+    const process = createProcessSnapshot(detail.displayJson)
+    const sourceJson = JSON.stringify(process)
+    const updated = sourceJson !== (props.model.subProcessSourceJson ?? JSON.stringify(snapshot.value))
       || detail.name !== selectedName.value
     if (!updated) { error.value = '片段库内容没有变化。'; return }
     if (!window.confirm('片段库中的内容已更新。刷新会覆盖当前节点保存的快照，是否继续？')) return
     props.beginEdit()
-    props.update('subProcessSelection', { key: detail.key, name: detail.name, process: createProcessSnapshot(detail.displayJson) })
+    props.update('subProcessSelection', { key: detail.key, name: detail.name, process, sourceJson })
   } catch (cause) {
     if (generation !== requestGeneration) return
     error.value = cause instanceof Error ? cause.message : String(cause)

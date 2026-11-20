@@ -2,6 +2,7 @@ import type { WorkflowDesignDocument, WorkflowEditorState, WorkflowInput, Workfl
 import { getWorkflowNodeDefinition, isWorkflowNodeType } from './nodes'
 import { workflowProtocolIssues } from './protocol-validation'
 import { parallelStructureIssues } from './parallel-validation'
+import { ensureWorkflowFlowIds } from './definition-ids'
 export { WORKFLOW_NODE_TYPES } from './nodes'
 
 
@@ -37,7 +38,7 @@ function normalizeWorkflowModel(value: Record<string, unknown>): WorkflowModel {
       y: typeof node.y === 'number' && Number.isFinite(node.y) ? node.y : 80 + index * 120,
     }
   }) as WorkflowModel['nodes'] : []
-  return { ...value, processId, processName: String(value.processName ?? processId), nodes, flows: Array.isArray(value.flows) ? value.flows as WorkflowModel['flows'] : [] } as WorkflowModel
+  return ensureWorkflowFlowIds({ ...value, processId, processName: String(value.processName ?? processId), nodes, flows: Array.isArray(value.flows) ? value.flows as WorkflowModel['flows'] : [] } as WorkflowModel)
 }
 
 function isEnvelope(value: Record<string, unknown>) {

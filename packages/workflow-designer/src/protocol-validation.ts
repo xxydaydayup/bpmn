@@ -1,11 +1,14 @@
 import { validateWorkflowModel } from '@workflow/sdk'
 import { toWorkflowModelInput } from './compiler-model'
+import { workflowDefinitionIdIssues } from './definition-id-validation'
 import type { WorkflowModel, WorkflowValidationIssue } from './types'
 
 /** Keep historical designer codes at the compatibility boundary. */
 export function workflowProtocolIssues(model: WorkflowModel): WorkflowValidationIssue[] {
-  return validateWorkflowModel(toWorkflowModelInput(model)).issues.map(issue => {
-    const segments = issue.path.split('/')
+  const protocolIssues = validateWorkflowModel(toWorkflowModelInput(model)).issues
+    .filter(issue => !['duplicate-node-id', 'duplicate-flow-id', 'duplicate-definition-id'].includes(issue.code))
+  return [...protocolIssues, ...workflowDefinitionIdIssues(model)].map(issue => {
+    const segments = (issue.path ?? '').split('/')
     const rootIndex = segments[1] === 'nodes' ? Number(segments[2]) : undefined
     const rootNode = rootIndex !== undefined ? model.nodes[rootIndex] : undefined
     const field = segments.at(-1)

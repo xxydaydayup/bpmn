@@ -5,6 +5,7 @@ import { IconArrowBackUp, IconArrowForwardUp, IconChecklist, IconCloudUpload, Ic
 import { createDesignDocument, isWorkflowModel, parseWorkflowInput, workflowEditorNodeIssues } from './contract'
 import { templateIcons } from './icons'
 import { cloneWorkflowModelWithFreshNodeIds, createNodeRecord, createWorkflowNodeId, fromCanvas, normalizeLegacyUuidNodeIds, toCanvas, type DesignerEdge, type DesignerNode } from './adapter'
+import { collectWorkflowDefinitionIds } from './definition-ids'
 import { canConnectNodes, validateWorkflowModel } from './validation'
 import { workflowProtocolIssues } from './protocol-validation'
 import { layoutWorkflow, refreshFeedbackRoutes } from './layout'
@@ -267,6 +268,10 @@ function getRecord(id: string) { return model.value.nodes.find(item => item.id =
 function updateNode(id: string, key: string, value: unknown) {
   if (readonlyMode.value) return
   const node = nodes.value.find(item => item.id === id); if (!node) return
+  if (key === 'subProcessSelection' && value && typeof value === 'object') {
+    const selection = value as { key: string; name: string; process: WorkflowSubProcessModel }
+    value = { ...selection, process: cloneWorkflowModelWithFreshNodeIds(selection.process, collectWorkflowDefinitionIds(model.value)) }
+  }
   if (key === 'timerType' && node.data.kind === 'timer') {
     updateTimerType(id, value as 'duration' | 'date' | 'cycle')
     return
@@ -287,13 +292,15 @@ function updateNode(id: string, key: string, value: unknown) {
       delete custom.sequential; delete original.sequential
       delete custom.passRate; delete original.passRate
     } else if (key === 'subProcessSelection') {
-      const selection = value && typeof value === 'object' ? value as { key?: unknown; name?: unknown; process?: unknown } : undefined
+      const selection = value && typeof value === 'object' ? value as { key?: unknown; name?: unknown; process?: unknown; sourceJson?: unknown } : undefined
       if (!selection) {
-        delete custom.subProcessKey; delete custom.subProcessName; delete custom.process
-        delete original.subProcessKey; delete original.subProcessName; delete original.process
+        delete custom.subProcessKey; delete custom.subProcessName; delete custom.subProcessSourceJson; delete custom.process
+        delete original.subProcessKey; delete original.subProcessName; delete original.subProcessSourceJson; delete original.process
       } else {
         custom.subProcessKey = selection.key; custom.subProcessName = selection.name; custom.process = selection.process
         original.subProcessKey = selection.key as string; original.subProcessName = selection.name as string; original.process = selection.process as WorkflowSubProcessModel
+        if (typeof selection.sourceJson === 'string') { custom.subProcessSourceJson = selection.sourceJson; original.subProcessSourceJson = selection.sourceJson }
+        else { delete custom.subProcessSourceJson; delete original.subProcessSourceJson }
       }
     } else if (key === 'reminder' && value && typeof value === 'object') {
       const reminder = Object.fromEntries(Object.entries(value).filter(([, entry]) => String(entry ?? '').trim()))
@@ -396,7 +403,7 @@ function onEdgeUpdate(event: { edge: { id: string }; connection: Connection }) {
 function addNode(type: WorkflowNodeType, position?: { x: number; y: number }) {
   if (readonlyMode.value) return
   const point = position ?? screenToFlowCoordinate({ x: Math.max(160, window.innerWidth / 2), y: Math.max(130, window.innerHeight / 2) })
-  const id = createWorkflowNodeId(type, nodes.value.map(node => node.id))
+  const id = createWorkflowNodeId(type, collectWorkflowDefinitionIds(model.value))
   const record = createNodeRecord(type, id, Math.round(point.x), Math.round(point.y), props.extensions?.nodeDefaults?.[type])
   const custom = Object.fromEntries(Object.entries(record).filter(([key]) => !['id', 'type', 'name', 'x', 'y'].includes(key)))
   nodes.value = [...nodes.value, { id: record.id, type: 'workflowNode', position: { x: record.x, y: record.y }, data: { kind: type, name: record.name, original: record, custom } } as DesignerNode]
@@ -420,8 +427,8 @@ function handleConnect(connection: Connection) {
   if (readonlyMode.value || !connection.source || !connection.target) return
   if (!connectionAllowed(connection.source, connection.target)) return
   pushHistory()
-  const id = createWorkflowNodeId('flow', edges.value.map(edge => edge.id))
-  edges.value = [...edges.value, { id, source: connection.source, target: connection.target, type: 'workflowRoute', data: { original: { source: connection.source, target: connection.target } }, markerEnd: 'arrowclosed' } as DesignerEdge]
+  const id = createWorkflowNodeId('flow', [...collectWorkflowDefinitionIds(model.value), ...edges.value.map(edge => edge.id)])
+  edges.value = [...edges.value, { id, source: connection.source, target: connection.target, type: 'workflowRoute', data: { original: { id, source: connection.source, target: connection.target } }, markerEnd: 'arrowclosed' } as DesignerEdge]
   activeNodeId.value = undefined; activeEdgeId.value = id; updateDocument()
 }
 function onNodeClick(event: NodeMouseEvent) { activeNodeId.value = event.node.id; activeEdgeId.value = undefined }

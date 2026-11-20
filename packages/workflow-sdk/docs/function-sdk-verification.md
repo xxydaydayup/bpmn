@@ -1,5 +1,75 @@
 # 函数 SDK 0.2.0 验证记录
 
+> 最终包、SHA-256、本轮9个部署清理及160个历史deploymentId的只读复核结果以[本期交付记录](../../../docs/handoffs/2026-11-19-workflow-function-sdk-delivery.md)为准；下方7部署/158个deploymentId保留为最终包重验前的时点记录。
+
+## 2026-11-19 宿主接入与范围复核（最新）
+
+- 07/10按用户调整后的范围完成证据复核；服务实际worker执行、NATS送达不计真实通过，嵌套end仅结束内部而外层仍ACTIVE的差异未修复。08仅businessKey、12仅无候选直接userId范围完成；其余后端错误保留。
+- 新增 SDK Gateway 和页面 SDK 启动/个人同意拒绝入口，保留所有旧 variables/按节点及原始 XML 路径。页面实测退回后同任务重派给 sdk-host-bob；单人同意完成；ALL会签首票同意后保留第二人，发布v3后按旧v2快照提交拒绝，历史走 rejected 并COMPLETED，未串用新模型。
+- 末尾v1任务缺少个人意见规则：SDK拒绝猜测，草稿保留；通过旧variables入口完成。匹配快照不会制造后端未声明的意见规则。
+- 本地证据：`.scratch/workflow-function-sdk/verification/2026-11-19-host-runtime.json`；5个隔离部署全部清理，清理后定义查询为空。业务行/模板历史可能按后端契约保留。该文件及原始日志位于本地忽略目录，跨机交付需另行保留。
+- 本轮全量 `pnpm test`：SDK52、designer128、forms12、根目录93，合计285通过；忙碌互斥、409草稿、实际任务版本、请求取消及旧结果/卸载隔离均有回归。此前并发执行的默认forms超时失败日志保留，不改写为通过；本次独立完整重跑通过。生产构建通过（既有大chunk警告）。
+- 14独立tgz组合验收通过：两层子流程 + ALL会签 + 分支/并行 + businessKey消息 + PT1S定时 + archive，分别覆盖通过和拒绝，真实历史COMPLETED且结束worker完成。服务任务及服务会签仅编译验证，不计worker执行通过。
+- 仓库外ESM/Schema/无DOM模型类型/client类型/浏览器构建通过，零运行时依赖。本轮7部署已清理；对有保存资源ID的历史报告共158个deploymentId逐一只读查询，剩余定义均为空；历史早期落盘失败且无法恢复ID的两资源仍不算已逐一核实。
+- 独立消费与最终清理记录：`2026-11-19-package-final.log`、`2026-11-19-final-combination.json`、`2026-11-19-final-cleanup-audit.json`（同一本地verification目录）。最终交付索引另见仓库 `docs/handoffs/2026-11-19-workflow-function-sdk-delivery.md`。以下旧状态/数量保留历史，不作为最新验收结论。
+
+
+## 2026-11-19 消息关联范围调整与交接
+
+08本期仅验收businessKey关联，复用既有真实消息/三种定时格式及错误证据，按调整范围completed。processInstanceId关联仍有ENGINE-13028后端bug，未修复、不计passed、不自动回退。当前待收口07/10，待实施13及最终14；本次仅更新文档和交接，未重跑测试、构建或真实引擎。
+
+## 2026-11-19 直接指定用户重派按调整范围完成
+
+用户确认本期任务可以不带候选用户/组。12复用无候选任务退回待重派、直接指定userId、新旧办理人筛选、同一任务完成与历史终态，以及受限/未授权和错误无自动重试证据，按调整范围completed。候选场景下游405未修复、未记passed，不再阻塞本期。13的05/11/12前置已满足，页面迁移与真实验收尚未执行。本次仅文档核对，未重新运行测试、构建或引擎；以下先前08/12未关闭描述为本次调整前历史。
+
+## 2026-11-19 用户调整本期验收边界
+
+用户接受07暂无真实服务，本期按已有离线定义/映射/保护及包消费证据核对，不强制真实服务调用与worker观测。用户接受10暂无NATS接收证据，以及嵌套审批超时end只终止内部作用域、外层并行仍ACTIVE。以上属于本期验收豁免/已接受差异，原始未验证与失败报告不变，未声称通知送达、服务真实执行或后端修复。07/10保持in-progress待按调整范围核对收口；08/12仍未关闭。本次仅更新范围记录，未重新执行测试、构建或真实引擎。
+
+## 2026-11-18 用户接受差异后继续
+
+用户确认接受状态入口缺所选办理人以500/INTERNAL_ERROR拒绝启动；400及提示属于后端待优化项，未修复。SDK保留真实500、unknown和资源上下文。04其余正常路径/映射/终态已通过，按调整口径completed，继续05和09。下列原始失败报告及等待记录保留历史。
+
+新增真实报告 `sdk_9ab5539796a04030918bf3377078619f.json` 的8个多人结算和2个子流程复用场景通过；状态缺参按接受口径通过，并显式记录 acceptedDiscrepancy/fixed=false，原始错误仍500/unknown。11部署cleaned。随后 `sdk_b3d53a692a6544668111a5eff3998e25.json` 在SDK修正后重新通过8个多人结算、2个子流程组合及2个专用消费者，12部署cleaned，环境仍localhost:5171、tenant-a、Camunda7.24.0。
+
+多人矩阵覆盖ALL/ANY/VOTE及顺序ALL通过/拒绝，3名参与人、逐票Boolean、原key表单/false/0与后续配置在一次complete提交；ANY首拒仍等待、VOTE达到2/3才通过、结算后未提交的并行任务取消，历史任务/实际分支/COMPLETED及结束worker均核对。递归场景在两个容器复用同名局部节点，其中一个两层嵌套，交叉验证内部choice通过/拒绝、parallel汇合及内部end后回外层resume/archive；按完整活动ID核对不同办理人。
+
+SDK另修正个人会签意见被当成汇总分支的提前必填判断，并识别任务规则provided=true的已供启动配置；个人意见仍每票必填，显式清空仍校验。先复现回归失败再修正，SDK49项通过。源码引擎报告与实际安装包消费者分别记录，不互相替代。
+
+追加审计修正：会签不预测汇总分支时，仍对调用者显式提交的必需启动配置执行非空检查；空字符串、null和名单空数组在发送前拒绝，省略未结算分支配置仍允许。回归先失败再通过，新增完整嵌套活动的运行时reminderDuration映射、类型和固定值保护，当前SDK **50/50** 与 `pnpm build` 通过，保留既有大chunk提示；根目录全量测试本轮未运行。源码报告 `sdk_9ac0ce6f61cd4eb5817bf09b4e6c61c4.json` 的延后配置ALL通过；该报告同时保留10的失败，不能整体称为passed。
+
+07离线补齐服务结果保护：原先已知service的数字索引result仍可作为业务变量写入，回归确认失败后，现按已知完整服务activityId保护 `{activityId}_result_数字`，覆盖嵌套、start及complete的fields/variables，普通业务key保持可写。补齐服务对象数组/false/0、准确fieldKey别名及模板固定配置只读检查，SDK当前 **52/52** 通过。真实服务环境未具备，07不标完成。后续构建/包与真实安装消费见07交付账目；此前包与报告原件保留。
+
+`sdk_13e6df7e344442869a534c3a00be3880.json` 从审计服务结果修正前的包 `ce1c6b19cf1f06fc2b9fc554b78c19de1404c66d963a254536d650a2fc69e399` 仓库外安装运行多人、子流程及5个超时通过场景，7项通过、7部署cleaned。此报告不覆盖07真实服务调用，也不把嵌套end失败改写通过。
+
+`sdk_4d14813828384e8a8885aa46b644cc02.json` 补齐延后配置并行/顺序ALL及递归已交付节点编译；`sdk_e71be0e5c95b43029701ead29a1cd0fd.json` 从仓库外实际安装包运行多人/子流程消费者通过，包SHA为 `f1b11c4bf3008a8a4ea03a8df6f89dbaa75bd0b1e29d8745e32deaca72dded75`。此为审计追加修正前的包，后续包另行记录，不覆盖历史tgz。05、09验收完成。
+
+## 2026-11-18 超时动作补验
+
+最终当前包位于本地 `artifacts/service-protection-final-2026-11-18/workflow-sdk-0.2.0.tgz`（verification同级目录），SHA256为 `53a24fc0e16e4259e38551a0c9b44df5db81d6ed8e777090e1709836360b1268`。SDK52项及最终生产构建通过；仓库外 `workflow-sdk-consumer-PFkGwK` 的离线ESM、零运行依赖、无DOM模型/定义类型、client类型和浏览器构建通过，另在安装包校验了显式空会签配置与服务索引结果保护。`sdk_8693b4f56ed64b0e94642194726e07fe.json` 真实执行多人/子流程消费者通过。最终账目 `07-approval-subprocess-timeouts-delivery.json` 索引9份报告、45个不同部署，逐一只读复核模板/部署404及定义为空；业务行/模板历史可能按后端契约保留。一次早期路径错误导致报告落盘失败的2个临时部署单独记录，未恢复逐资源ID，未计入这45个已复核资源或独立安装证据。
+
+`sdk_fcf3581f5ff94f5ca9cf1f90e683f829.json` 的运行时PT4S退回、两层子流程内部同层退回、子流程容器退回、会签退回及顶层子流程容器end共5项通过。退回核对原任务取消、新任务ID、原key/false/0、实例ACTIVE、后续尚未执行、重新进入并正常COMPLETED及结束worker；容器退回取消全部内部并行任务，会签退回取消全部个人任务。派生事件从后端XML核对，业务模型未预填。
+
+同一报告的两层子流程内部审批end失败：内部review/legal取消，但外层sibling仍等待，实例ACTIVE。后续 `sdk_9ac0ce6f61cd4eb5817bf09b4e6c61c4.json` 以及 `sdk_e16c12fc108d4aa7b6dbb01b2d38c94f.json` 在timeoutEnd结束后继续约7秒有限观察仍失败；后者同时保存原生引擎任务和历史实例，状态一致、endTime=null、无待处理external task。后端生成的terminateEventDefinition位于内部subProcess，仅结束所在作用域，未满足正式规范“整个实例终止”。这是后端待处理差异，未修复；SDK不伪造终态或另发终止请求。
+
+用户明确表示当前没有NATS提醒观察连接或接收查询，notify保留待验收。10仍in-progress，不把已完成的提醒活动或部分end成功当作全部验收完成；[后端复现说明](../../../docs/handoffs/2026-11-18-workflow-sdk-timeout-end-backend-issue.md)。三份超时相关报告共9个部署均记录cleaned，失败实例也只清理本次隔离资源。当前总账以本地 `07-approval-subprocess-timeouts-delivery.json` 为准。
+
+## 2026-11-18 接续复验（用户接受差异前的历史）
+
+用户要求等待其验证后再继续；05/09 未实施。02 当前发布协议已调整：multipart 不发送 startable，保留响应字段；旧 true 选项弃用兼容，false 在网络前拒绝。正式 Swagger 已不再声明该请求字段，来源、时间及原文 SHA 见 [发布契约](../contract/backend-publish-2026-11-18.json)。
+
+环境为 localhost:5171、tenant-a、Camunda 7.24.0。三个原始报告位于本地 verification，旧报告保留：
+
+| 报告 | 实际结果 |
+| --- | --- |
+| sdk_fcebc692bd094f05b8b9988919f1da55.json | 最小发布版本/名称/display-json/部署定义及无自动启动通过；agree/reject、金额101/0只传所选办理人及终态通过。状态负向检查在500处中断，该报告未执行正常状态路径。 |
+| sdk_2b54634c6dfb4bd99c7aa03c9c96bcfa.json | ready/unknown只传所选办理人、实际节点/办理人/历史终态通过；金额两路径缺参均400/VARIABLE_VALIDATION_FAILED。状态两路径缺参仍500/INTERNAL_ERROR、effect=unknown，精确业务键运行实例为空。timer-required通过；实例ID消息仍ENGINE-13028，候选重派仍500/下游405。 |
+| sdk_334d792d888a4da9a0621cb66a1df35c.json | 仅含timer的duration/date/cycle均发布执行成功，到期前ACTIVE/无人工任务，到期后COMPLETED/结束worker通过，旧命名空间失败本轮不复现；带真实候选用户/组的refuse仍500/下游405。 |
+
+15个隔离部署均已cleaned。状态start-variables带决策query仍返回两分支候选，SDK保守作为hints并保留诊断，不本地求值。04保持in-progress；08仍缺实例ID消息成功链路，12仍缺带候选分配的完整成功链路。见 [本轮待验证记录](../../../docs/handoffs/2026-11-18-workflow-function-sdk-validation-followup.md)。
+
+本轮SDK47项及pnpm build通过，保留既有大chunk提示；未重跑根目录全量测试。最终包SHA/消费者/检查账目见本地06-resume-delivery.json。以下2026-11-17内容均为历史证据。
+
 日期：2026-11-17（Asia/Shanghai）。Windows、Node.js 24.19.0、pnpm 9.9.0。模型兼容基线仍为后端 /bpmn/spec v1 的 2026-11-16 快照。
 
 ## 2026-11-17 新运行契约适配

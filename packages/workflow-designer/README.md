@@ -16,7 +16,7 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 流程画完后，从业务 JSON 到引擎部署的链路是：业务 JSON → 后端编译为 Camunda 标准 XML → 部署 → params_rules。
 
-1. 设计器把画布导出为约定好的业务 JSON（如 `project_approval_json`）：节点含 id、type、name 和 x/y 坐标，连线可带 branch。新建节点使用 `节点类型_32位UUID` 标识，例如 `approval_937c1a82933b42b492a7ed676c3de0fc`；UUID 不含连字符，以便后端按节点标识生成的 Camunda EL 变量名（如 `${approval_..._assignee}`）保持合法。导入旧版 `节点类型_UUID` 标识时会自动移除 UUID 连字符，并同步更新连线和节点间引用。
+1. 设计器把画布导出为约定好的业务 JSON（如 `project_approval_json`）：节点含 id、type、name 和 x/y 坐标，连线含 id、source、target，可带 branch。新建节点使用 `节点类型_32位UUID` 标识，例如 `approval_937c1a82933b42b492a7ed676c3de0fc`，新建连线使用 `flow_32位UUID`；UUID 不含连字符，以便后端按节点标识生成的 Camunda EL 变量名（如 `${approval_..._assignee}`）保持合法。导入旧版 `节点类型_UUID` 标识时会自动移除 UUID 连字符，并同步更新连线和节点间引用。
 2. 宿主 compile 回调把业务 JSON 提交后端 `/v1/bpmn/json2xml`，编译为 Camunda 标准 BPMN XML（如 `docs/examples/立项申请/立项申请.bpmn`）。
 3. 宿主 deploy 回调发布任务模板，由后端部署到流程引擎。部署时引擎后端从编译产物推导全局变量 `params_rules`，确定流程进行到某一节点时需要的传参。变量名按节点标识与属性扩充生成（如 `apply_assignee`、`managers_approverList`）。每条规则包含 `name`、`type`、`description`、`value`、`source`、`required`，并带有 `nodeId`、`nodeName`、`nodeType` 三个节点元数据：分别是所属节点的标识、显示名称和业务类型；它们用于说明变量对应哪个节点，不是流程启动时要提交的变量值。`source` 分三类：
    - `start`：启动流程实例时传入，如办理人、会签名单；
@@ -24,7 +24,9 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
    - `engine`：流程定义已固化，无需传入，如会签审批模式。
 4. 启动流程时根据 `params_rules` 中 `source: 'start'` 的规则组装 `variables`，连同业务键等提交启动接口；`nodeId`、`nodeName`、`nodeType` 等规则元数据不放入 `variables`。
 
-`docs/examples/立项申请/` 是该链路的完整对照示例：`立项申请.js` 含业务 JSON、params_rules 与启动传参 start_payload，`立项申请.bpmn` 是后端编译产物，`立项申请流程图.png` 为流程图截图。内置流程模板还包括后端已部署的 `msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae`（固定消息名 `msg_wait_name`）和 `timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae`（固定等待时长 `PT1M`）。模板选择器会显示这两个来源流程定义；应用时复制节点及连线并重新生成节点标识。
+`docs/examples/立项申请/` 是该链路的完整对照示例：`立项申请.js` 含业务 JSON、params_rules 与启动传参 start_payload，`立项申请.bpmn` 是后端编译产物，`立项申请流程图.png` 为流程图截图。内置流程模板还包括后端已部署的 `msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae`（固定消息名 `msg_wait_name`）和 `timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae`（固定等待时长 `PT1M`）。模板选择器会显示这两个来源流程定义；应用时递归复制节点及连线并重新生成它们的定义 ID。
+
+设计器要求整个业务工作流模型中的节点 ID 和连线 ID 共用一个唯一命名空间，包含全部嵌套 `subProcess.process`。新建元素、应用模板和引用子流程片段时分配 ID；复制片段会逐层重写 `source`、`target`、`reminder.target`，保证引用仍指向当前层对应节点。后续编辑、撤销重做和保存沿用已分配的 ID。导入已有模型时保留稳定节点 ID，递归补齐省略的连线 ID；重复的定义 ID 保留并报错，阻止编译和发布，不自动替换冲突节点。`processId` 继续由用户填写，不参与这项唯一性检查，由后端最终校验。`bizJson`、`conditionExpression` 等自定义文本保持原文；文本中如含节点 ID，由宿主或使用者维护。
 
 服务节点可选择启用 `countersign: true` 的多服务调用，并在节点业务 JSON 上配置 `approveMode`（ALL / ANY / VOTE）、`sequential`（缺省 false，即并行）和 VOTE 专用 `passRate`。`serviceName` 与 `serviceUrl` 仍是旧单服务配置，并可作为多服务清单项目的缺省值；具体服务集合属于流程实例启动输入，不保存在设计稿中。未带 `countersign` 的旧服务节点保持单服务语义。
 
@@ -36,19 +38,19 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 所有内置节点也支持「业务数据（bizJson）」多行编辑，片段模式同样可用；原有 bizType 在片段模式中隐藏。bizJson 是可选字符串，允许非 JSON 文本，内容不解析、不格式化、不 trim。未填写时保持缺省；UI 提交空字符串会删除字段，导入显式空字符串和纯空白字符串则保留。对象、数组、null、数字和布尔值保留原输入并报 field-type，禁止编译。宿主完整自定义属性编辑器继续优先于默认面板。
 
-bizJson 随 v-model、设计稿、模型、模板复制、片段快照和 compile 回调保留。子流程容器及每层内部节点分别设置，复制新 ID 不修改字符串内容。后端将其写为 camunda:property(name=bizJson) 模板默认值，并声明实例变量 {activityId}_bizJson 优先，删除后回退默认值；内部 activityId 以后端展开结果为准。2026-11-18 编译核对发现后端会去掉首尾空白，详见 [bizJson 验证记录](../workflow-sdk/docs/node-bizjson-verification.md)。本次仅验证编辑与编译，未验收实例变量覆盖/回退。
+bizJson 随 v-model、设计稿、模型、模板复制、片段快照和 compile 回调保留。子流程容器及每层内部节点分别设置，复制新 ID 不修改字符串内容。后端将其写为 camunda:property(name=bizJson) 模板默认值，并声明实例变量 {activityId}_bizJson 优先，删除后回退默认值；新契约下内部 activityId 沿用该节点原 ID。2026-11-18 旧契约编译核对发现后端会去掉首尾空白，详见 [bizJson 验证记录](../workflow-sdk/docs/node-bizjson-verification.md)。该记录仅验证编辑与编译，未验收实例变量覆盖/回退。
 
 ## 扩展能力
 
-设计器支持 `type: 'subProcess'` 的嵌入式子流程节点。选择节点属性中的片段后，设计稿保存片段库来源 key/name 与 `process` 内容快照；宿主提交编译前会剔除来源字段和片段画布宽高，只发送后端 `/bpmn/spec` 规定的递归流程字段。编译器按规范展开完整子流程（包括逐层前缀化内部节点与连线 ID，并重写同层提醒目标）。设计器片段编辑模式允许不含开始或结束节点，保存前要求至少一个节点；管理页面和 API 仍由宿主提供。片段库后续修改不会自动改变已保存节点快照。
+设计器支持 `type: 'subProcess'` 的嵌入式子流程节点。选择节点属性中的片段后，设计稿保存片段库来源 key/name 与 `process` 内容快照，并以 `subProcessSourceJson` 保存分配新 ID 前的来源快照，用于判断片段库内容是否变化；宿主提交编译前会剔除来源字段和片段画布元数据，嵌入式 `process` 发送 `nodes`、可选 `flows` 和可选业务表单引用 `bizFormKey`。旧设计稿的内部 `processId`、`processName` 可作为编辑元数据保留，编译时剥离；内部 `bizFormKey` 和节点本身的业务属性仍按契约保留。2026-11-20 后端契约不再为内部节点和连线添加父节点 ID 前缀，编译时沿用前端传入的唯一 ID；`source`、`target`、`reminder.target` 仍只能引用同层节点。设计器片段编辑模式允许不含开始或结束节点，保存前要求至少一个节点；管理页面和 API 仍由宿主提供。片段库后续修改不会自动改变已保存节点快照。
 
 设计器后续会持续新增节点类型和节点属性来扩展能力。按 ADR-0005 的契约，新增影响编译的节点或字段时，须先升级正式业务 JSON 契约并实现后端编译能力，再同步 schema 副本、前端类型与映射；未升级前，未知业务字段/节点保持原样并阻止编译。`subProcess.process` 的正式编译字段以 [业务 JSON 规范](http://192.168.124.202:8085/bpmn/spec) 为准，Schema 副本的来源说明也应引用该后端规范。
 
-标准模型类型、Schema 与协议校验由独立 [@workflow/sdk](../workflow-sdk/README.md) 提供，基线为后端 `/bpmn/spec` version 1 的 2026-11-18 快照（含 bizJson，旧快照保留）。`schema/workflow-model-v1.schema.json` 为 SDK Schema 的同步下载副本，使用 `pnpm --filter @workflow/designer sync:schema` 更新，不单独维护；真实立项审批 fixture 位于 `src/fixtures/project-approval.json`。后端执行契约仍由编译器维护方负责。
+标准模型类型、Schema 与协议校验由独立 [@workflow/sdk](../workflow-sdk/README.md) 提供，ID 与嵌入式流程字段按 2026-11-20 后端 `/bpmn/spec` 契约同步，先前的 2026-11-18 等快照保留作历史依据。`schema/workflow-model-v1.schema.json` 为 SDK Schema 的同步下载副本，使用 `pnpm --filter @workflow/designer sync:schema` 更新，不单独维护；真实立项审批 fixture 位于 `src/fixtures/project-approval.json`。后端执行契约仍由编译器维护方负责。
 
 SDK 允许省略名称、坐标和 flows；设计器补齐编辑默认值，并继续检查唯一开始/结束、名称、普通回路和连接策略。标准字段/会签/分支/等待/提醒/子流程语义交由 SDK 检查，诊断通过 path 与 scope 映射到画布；扩展校验仍可追加。设计器支持 SDK 的 parallel 并行网关，可从流程控制节点库添加。属性按入出线说明分流、汇合或先汇合再分流，不创建待办、不代表审批通过。并行出线禁止新增 branch/conditionExpression；非法导入保留字段并阻止编译。旧兼容类型继续保留并提示画布能力限制。基本编辑、嵌套检查、片段复用、真实编译与三次隔离实例汇合已验证，分层结果记录在 [并行网关验证说明](docs/parallel-gateway-verification.md)。
 
-宿主可从 `@workflow/designer` 导入 `toWorkflowCompilerJson(model)`：它只剥离已知流程画布宽高与片段来源元数据，再调用 SDK 的校验/导出。节点 x/y/width/height 保留，未知业务字段不剥离。视口、主题和路由继续留在设计稿信封中。需要单独使用模型能力的接入方安装 SDK 即可，完整流程见 [接入指南](../workflow-sdk/docs/integration.md)。
+宿主可从 `@workflow/designer` 导入 `toWorkflowCompilerJson(model)`：它剥离已知流程画布宽高、片段来源及嵌入式流程的旧 `processId`、`processName` 元数据，保留内部 `bizFormKey`，递归补齐省略的连线 ID，并经 SDK 校验整个模型的节点与连线定义 ID 唯一性后导出。节点 x/y/width/height 保留，未知业务字段不剥离。SDK 标准模型、函数定义与设计器均遵循 2026-11-20 后端契约，要求节点和连线定义 ID 在整个模型中唯一。视口、主题和路由继续留在设计稿信封中。需要单独使用模型能力的接入方安装 SDK 即可，完整流程见 [接入指南](../workflow-sdk/docs/integration.md)。
 
 根仓库 /workflow-designer 是集成示例：提供 JSON 查看/粘贴或文件导入、JSON 转 XML、BPMN XML 结果查看、基础流程检查和显式确认的业务任务模板发布。设计器库不假定部署 API；在此宿主中，compile 回调使用 /api/v1/bpmn/json2xml，deploy 回调复用 /api/v1/template，并在不确定的网络结果时允许查询模板状态。示例流程坐标预先排成适合首次展示的纵向布局；页面首次打开和导入模型时保留已有节点坐标，只有用户主动选择“自动布局”时才运行 ELK 重排。保存的编辑器视口仍会在打开时恢复。/designer 继续提供 BPMN/XML 直接建模与引擎部署。
 

@@ -10,7 +10,9 @@
 
 参考包内 [serial.json](../examples/serial.json)、[boolean-branches.json](../examples/boolean-branches.json)、[state-branches.json](../examples/state-branches.json)、[parallel.json](../examples/parallel.json)、[countersign.json](../examples/countersign.json)、[service.json](../examples/service.json)、[service-countersign.json](../examples/service-countersign.json)、[waits.json](../examples/waits.json)、[timeouts.json](../examples/timeouts.json)、[nested.json](../examples/nested.json)。`invalid-vote.json` 与 `invalid-cross-scope.json` 分别展示投票缺失和跨层引用错误。
 
-顶层必需 processId、非空 nodes；节点必需 id/type；连线必需 source/target。流程名、节点名、整数布局坐标、flows 可省略。嵌入式 process 不要求 processId，但必须有非空 nodes，局部 ID 只需本层唯一。业务字段必须按协议命名和类型传递，不把自有展示字段混入标准模型。
+顶层必需 processId、非空 nodes；节点必需 id/type；连线必需 source/target。流程名、节点名、整数布局坐标、flows 可省略。嵌入式 process 支持 nodes、可选 flows 和可选业务表单引用 bizFormKey，其中 nodes 必须非空，不接受 processId、processName。所有层级的节点和连线定义 ID 共用一个唯一命名空间，根 processId 不参与该命名空间，其唯一性由后端校验。业务字段必须按协议命名和类型传递，不把自有展示字段混入标准模型。
+
+连线 id 仍可省略，后端缺省生成 `flow_{source}_{target}`，冲突时追加序号。SDK 只检查显式节点和连线定义 ID 在整个模型中的冲突，不推断后端生成的序号。使用业务设计器时会在模型中递归补齐 UUID 连线 ID，保存后继续沿用。
 
 ```ts
 import { validateWorkflowModel, toBpmnCompilerJson, WorkflowModelError } from '@workflow/sdk'
@@ -29,7 +31,7 @@ export function prepareModel(partnerOutput: unknown) {
 }
 ```
 
-校验覆盖结构、同层 ID / 引用、跨层连接、会签比例、操作开关、分支、等待和超时组合。Schema 通过只代表结构正确，还需语义校验。表达式保留原文，不在 SDK 中运行。未知业务数据报错且保留，接入方应修正映射或与平台协商协议升级。
+校验覆盖结构、整个模型的定义 ID 唯一性、同层引用、跨层连接、会签比例、操作开关、分支、等待和超时组合。Schema 通过只代表结构正确，还需语义校验。表达式保留原文，不在 SDK 中运行。未知业务数据报错且保留，接入方应修正映射或与平台协商协议升级。
 
 ## 节点业务数据
 
@@ -49,7 +51,7 @@ const model = defineWorkflow({ key: 'business_data' },
 
 片段编辑器保存公开 exportDesign().model 后，可通过已有 subprocessFragments 数据源引用。选择时保存独立快照，片段库变化不会自动改写，显式刷新才更新；复制模型的新 ID 不修改 bizJson 内部内容。compile 请求与发布 display-json 保留各层原文。
 
-后端编译把值写入 camunda:property(name=bizJson) 作为模板默认值。后端声明实例变量 {activityId}_bizJson 优先，删除变量后回退模板默认值；上例内部节点的 activityId 以编译后实际展开值为准（本次为 outer_inner_review），SDK 不提前加前缀，也不自动生成变量或 params_rules。本次只核对编译 XML，未部署、启动或验证变量覆盖/回退。2026-11-18 后端会截去首尾空白，见 [验证记录](./node-bizjson-verification.md)。
+后端编译把值写入 camunda:property(name=bizJson) 作为模板默认值。后端声明实例变量 {activityId}_bizJson 优先，删除变量后回退模板默认值；2026-11-20 新契约下，上例内部节点的 activityId 为原节点 ID `review`，对应 `review_bizJson`。SDK 不生成这些变量或 params_rules。2026-11-18 的编译证据使用旧契约，当时活动名为 `outer_inner_review`，并发现后端截去首尾空白，见 [历史验证记录](./node-bizjson-verification.md)。该记录只核对 XML，未部署、启动或验证变量覆盖/回退，不表示新契约已完成运行验收。
 
 ## 编译与发布
 
@@ -87,7 +89,7 @@ async function compileAndPublish(model: WorkflowModel, hostRequest: (path: strin
 }
 ```
 
-先由业务系统安排发布权限和用户确认，再执行发布。`display-json` 保存标准模型，接入方自己的设计稿另外持久化。后端生成 XML、层级前缀、监听器、超时派生节点及参数规则；SDK 不复制这些逻辑。请求超时后先查询模板和版本确认是否已发布，再决定重试，避免重复部署。
+先由业务系统安排发布权限和用户确认，再执行发布。`display-json` 保存标准模型，接入方自己的设计稿另外持久化。后端沿用模型中的节点和连线 ID，生成 XML、监听器、超时派生节点及参数规则；SDK 不生成这些执行结构。请求超时后先查询模板和版本确认是否已发布，再决定重试，避免重复部署。
 
 ## 启动实例与办理任务
 
@@ -131,7 +133,9 @@ assignee、approveMode、reminder.duration、timerValue、bizFormKey 等未填�
 
 condition 支持 pass/reject、唯一 default、状态值或显式 EL。布尔推导需唯一直接上游审批/会签/服务；状态分支不能混用 pass/reject，状态值须全部唯一或全部省略由后端生成。显式 conditionExpression 优先，default 不允许表达式。parallel 的出边不可有分支或表达式。状态变量的阶段及名称以参数规则为准。
 
-子流程内部保持局部 ID、相对坐标和同层 reminder.target，编译器逐层展开为 `{容器ID}_{内部ID}`。运行时使用后端返回的 activityId 和参数规则，不自行在模型里前缀化，不给业务表单字段 key 擅自加前缀。
+子流程内部保留相对坐标和同层 reminder.target，节点及连线 ID 必须与整个模型内其他定义不同。2026-11-20 后端取消 `{容器ID}_{内部ID}` 自动展开规则，内部节点沿用原 ID 作为活动标识；例如内部 `review` 的办理人变量按规则为 `review_assignee`。运行时以实际 taskDefinitionKey、后端 activityId 和参数规则为准，业务表单字段 key 保持原值。
+
+新契约不会重命名既有部署或实例。历史任务继续按真实 processDefinitionId 读取相应版本快照，使用当时的 taskDefinitionKey 和后端参数规则；旧模型应显式迁移为全局唯一 ID 后再重新编译发布，不用新定义解释旧实例。
 
 receive 不创建人工待办，messageName 模板优先，其次启动变量，最终默认节点 ID；业务方调用 `POST /api/v1/messages` 关联消息。timer 不创建人工待办，timerType 在模板确定，timerValue 未固定则必须在启动时提供，无兜底值。reminder 可配在 approval/countersign/subProcess，notify 提醒并继续等待，return 中断后退回同层目标，end 终止整个实例；派生节点与监听器都由后端生成。
 

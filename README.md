@@ -49,7 +49,11 @@ pnpm preview    # 预览构建结果
 
 新增独立的 `@workflow/sdk`，提供 WorkflowModel v1 类型、标准 JSON Schema、离线校验和编译 JSON 导出。第三方设计器在自己的项目中将 XML/JSON 转成标准模型即可接入，无需嵌入本平台页面；SDK 不依赖 Vue 或 DOM。现有业务设计器已复用该协议校验，保留编辑规则与设计稿。业务设计器现已支持 parallel 并行网关的基本编辑、设计稿往返和后端 XML 编译；分流激活全部出线，汇合等待全部入线。支持嵌套检查、片段复用和并行审批模板；新设计器产物已验证两种办理顺序及内外层汇合，见[分层验证记录](packages/workflow-designer/docs/parallel-gateway-verification.md)。
 
-SDK 0.2.0 新增 `@workflow/sdk/definition` 函数定义入口与 `@workflow/sdk/client` 业务网关入口，覆盖编译、发布、参数映射、启动/办理、消息、版本/进度/历史与重派；模型入口仍保持离线兼容。宿主业务设计器的编译/发布通过 request adapter 复用客户端。使用方式见 [SDK 说明](packages/workflow-sdk/README.md)、[函数 SDK 指南](packages/workflow-sdk/docs/function-sdk.md) 和 [验收边界](packages/workflow-sdk/docs/function-sdk-verification.md)。运行 `pnpm pack:sdk` 生成 `.scratch/workflow-model-sdk/artifacts/workflow-sdk-0.2.0.tgz`；只生成安装包，不发布 npm。后端仍负责 XML、参数规则、部署、权限和实例执行。人工决定按任务规则兼容 passed 与旧 approved/vote；入口动态分支仍存在后端必填校验差异，见验收边界。
+SDK 0.2.0 新增 `@workflow/sdk/definition` 函数定义入口与 `@workflow/sdk/client` 业务网关入口，覆盖编译、发布、参数映射、启动/办理、消息、版本/进度/历史与重派；模型入口仍保持离线兼容。宿主业务设计器的编译/发布通过 request adapter 复用客户端。使用方式见 [SDK 说明](packages/workflow-sdk/README.md)、[函数 SDK 指南](packages/workflow-sdk/docs/function-sdk.md) 和 [验收边界](packages/workflow-sdk/docs/function-sdk-verification.md)。运行 `pnpm pack:sdk` 生成 `.scratch/workflow-model-sdk/artifacts/workflow-sdk-0.2.0.tgz`；只生成安装包，不发布 npm。后端仍负责 XML、参数规则、部署、权限和实例执行。人工决定按任务规则兼容 passed 与旧 approved/vote。发布请求不再发送 startable；入口状态/金额正常分支已通过，状态分支缺参仍返回后端 500，见验收边界。
+
+函数 SDK 的多人 ALL/ANY/VOTE、顺序多人通过/拒绝结算，以及两层子流程复用、分支/并行与内部 end 返回外层已完成真实验收，并提供独立消费者。状态入口缺参500已按用户确认口径接受，400及提示仍属后端待优化。超时退回及顶层子流程整体终止已通过；嵌套审批超时 end 仅终止内部作用域，notify 尚缺接收记录，真实服务尚未验证。2026-11-19 用户同意本期放宽真实服务、通知送达和嵌套 end 整实例终止验收，属于验收例外而非真实能力通过或后端修复。本期重派仅覆盖不带候选用户/组、直接指定用户标识的任务，已有真实链路通过；候选场景下游405未修复且不在本期范围。本期消息按业务键 businessKey 关联验收通过；实例 ID 消息仍有 ENGINE-13028 后端问题，暂不在本期验收范围。宿主接入及独立包组合交付已按本期调整范围完成，最终包、真实验收与保留边界见[本期交付记录](docs/handoffs/2026-11-19-workflow-function-sdk-delivery.md)。
+
+业务设计器的节点与连线定义 ID 在整个业务工作流模型中唯一，覆盖全部嵌套子流程。新建、模板复制和片段引用使用无连字符的 UUID，复制时同步更新同层连线与提醒目标；导入旧模型保留稳定节点 ID，递归补齐省略的连线 ID，发现重复则阻止编译和发布。`processId` 仍由用户填写并由后端校验唯一性。2026-11-20 后端契约取消子流程 ID 自动前缀，SDK 校验与函数定义同步采用整个模型唯一的规则；内部节点的运行时标识沿用提交的节点 ID。子流程 `process` 提交 `nodes`、可选 `flows` 和可选业务表单引用 `bizFormKey`，不携带 `processId`、`processName`。历史实例仍按实际定义版本和后端参数规则处理，详见[设计器说明](packages/workflow-designer/README.md)。
 
 ## 当前范围
 
@@ -307,3 +311,8 @@ const columns = [
 迁移背景、当前接口与扩展顺序见[表格迁移方案](docs/table-migration-plan.md)。
 
 生产部署使用 `dist`，需要将页面路由回退到 `index.html`，并由服务器代理 `/api` 或配置 `VITE_API_BASE_URL`。Vite 的开发代理不会进入生产构建。
+
+
+### 2026-11-19 业务工作台 SDK 接入
+
+`/workflow-business` 的模板详情、人工任务查询、SDK 启动、SDK 同意/拒绝、退回待重派和直接指定 userId 重派已接入 SDK。旧 variables、按节点调试、原始 XML 发布及模板列表/删除继续保留；独立业务表单提交未迁移。SDK 办理按任务 `processDefinitionId` 匹配历史快照，不使用最新模型解释旧任务。后端未声明个人意见变量时，SDK 不猜测写入，需使用 variables 兼容入口。单人同意、多人个人同意/拒绝、新旧版本共存及退回重派已通过隔离真实页面验证，详见 [验证记录](packages/workflow-sdk/docs/function-sdk-verification.md)。

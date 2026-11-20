@@ -72,9 +72,29 @@ test('protocol snapshot and generated Schema remain traceable and do not drift',
   assert.deepEqual(Object.keys(backend.node.fields).sort(), Object.keys(workflowModelSchema.$defs.node.properties).sort())
   const schemaBytes = readFileSync(new URL('../' + workflowSdkCompatibility.jsonSchema.snapshot, import.meta.url))
   assert.equal(createHash('sha256').update(schemaBytes).digest('hex'), workflowSdkCompatibility.jsonSchema.sha256)
-  assert.equal(JSON.parse(schemaBytes).$defs.nodeBase.properties.bizJson.type, 'string')
+  const backendSchema = JSON.parse(schemaBytes)
+  assert.equal(backendSchema.$defs.nodeBase.properties.bizJson.type, 'string')
+  const childBusinessFields = Object.keys(backendSchema.$defs.subProcessBody.properties).filter(key => !['subProcessKey', 'subProcessName'].includes(key)).sort()
+  assert.deepEqual(Object.keys(workflowModelSchema.$defs.process.properties).sort(), childBusinessFields)
   assert.deepEqual(JSON.parse(readFileSync(new URL('../schema/workflow-model-v1.schema.json', import.meta.url))), workflowModelSchema)
   assert.deepEqual(JSON.parse(readFileSync(new URL('../../workflow-designer/schema/workflow-model-v1.schema.json', import.meta.url))), workflowModelSchema)
+})
+
+test('subprocess bodies preserve bizFormKey while process identity belongs to the root', () => {
+  const input = { processId: 'root', processName: 'Root', bizFormKey: 'form:root@1', nodes: [{
+    id: 'child', type: 'subProcess', process: { bizFormKey: 'form:child@2', nodes: [{
+      id: 'nested', type: 'subProcess', process: { bizFormKey: 'form:nested@3', nodes: [{ id: 'review', type: 'approval' }] },
+    }] },
+  }] }
+  const before = structuredClone(input)
+  assert.equal(schema(input), true, JSON.stringify(schema.errors))
+  assert.deepEqual(toBpmnCompilerJson(input), before)
+  assert.deepEqual(input, before)
+  for (const key of ['processId', 'processName']) {
+    const invalid = structuredClone(input)
+    invalid.nodes[0].process[key] = 'legacy'
+    has(invalid, 'unknown-field', '/nodes/0/process/' + key)
+  }
 })
 
 test('optional fields, runtime inputs, explicit false, local IDs and order are kept without editor policies', () => {
@@ -120,6 +140,45 @@ test('duplicate IDs and cross-scope links use root-relative JSON Pointers', () =
   has(nested, 'reminder-target-invalid', '/nodes/1/process/nodes/2/process/nodes/1/reminder/target')
 })
 
+test('node and explicit flow definitions are globally unique while omitted flow IDs stay optional', () => {
+  const model = { processId: 'review', nodes: [
+    { id: 'review', type: 'approval' },
+    { id: 'left', type: 'subProcess', process: { nodes: [{ id: 'inner', type: 'approval' }], flows: [{ id: 'inside-flow', source: 'inner', target: 'inner' }] } },
+  ], flows: [{ id: 'outside-flow', source: 'review', target: 'left' }] }
+  assert.equal(validateWorkflowModel(model).valid, true)
+  const crossLayerNode = structuredClone(model)
+  crossLayerNode.nodes[1].process.nodes[0].id = 'review'
+  crossLayerNode.nodes[1].process.flows = []
+  has(crossLayerNode, 'duplicate-node-id', '/nodes/1/process/nodes/0/id')
+  assert.deepEqual(issues(crossLayerNode).find(issue => issue.code === 'duplicate-node-id').scope, ['left'])
+  const crossLayerFlow = structuredClone(model)
+  crossLayerFlow.nodes[1].process.flows[0].id = 'outside-flow'
+  has(crossLayerFlow, 'duplicate-flow-id', '/nodes/1/process/flows/0/id')
+  const crossKind = structuredClone(model)
+  crossKind.nodes[1].process.flows[0].id = 'review'
+  has(crossKind, 'duplicate-definition-id', '/nodes/1/process/flows/0/id')
+  const nestedMetadata = structuredClone(model)
+  nestedMetadata.nodes[1].process.processId = 'review'
+  has(nestedMetadata, 'unknown-field', '/nodes/1/process/processId')
+  const omitted = { processId: 'flow_a_b', nodes: [{ id: 'a', type: 'approval' }, { id: 'b', type: 'approval' }, { id: 'flow_a_b', type: 'end' }], flows: [
+    { source: 'a', target: 'b' }, { source: 'a', target: 'b' }, { id: 'flow_b_a', source: 'a', target: 'b' }, { source: 'b', target: 'a' },
+  ] }
+  assert.equal(validateWorkflowModel(omitted).valid, true, JSON.stringify(issues(omitted)))
+  assert.deepEqual(toBpmnCompilerJson(omitted), omitted)
+})
+
+test('shared process objects are checked at every path and cycles still terminate', () => {
+  const process = { nodes: [{ id: 'inner', type: 'approval' }], flows: [{ id: 'transition', source: 'inner', target: 'inner' }] }
+  const model = { processId: 'shared', nodes: [
+    { id: 'left', type: 'subProcess', process }, { id: 'right', type: 'subProcess', process },
+  ] }
+  has(model, 'duplicate-node-id', '/nodes/1/process/nodes/0/id')
+  has(model, 'duplicate-flow-id', '/nodes/1/process/flows/0/id')
+  const cyclic = { processId: 'cycle', nodes: [] }
+  cyclic.nodes.push({ id: 'container', type: 'subProcess', process: cyclic })
+  has(cyclic, 'cyclic-input', '/nodes/0/process')
+})
+
 test('vote rates, node switches and service countersign preserve runtime configuration', () => {
   has(task({ type: 'countersign', approveMode: 'VOTE' }), 'pass-rate-required', '/nodes/0/passRate')
   for (const passRate of ['0', '1.1', '-1', 'NaN', '0x1']) has(task({ type: 'service', countersign: true, approveMode: 'VOTE', passRate }), 'pass-rate-range', '/nodes/0/passRate')
@@ -132,7 +191,7 @@ test('vote rates, node switches and service countersign preserve runtime configu
 
 test('branch inference respects explicit EL, default and generated state modes', () => {
   const input = load('state-branches')
-  has({ ...input, flows: [...input.flows, { source: 'g', target: 'ok', branch: 'default' }] }, 'default-branch-duplicate', '/flows/4/branch')
+  has({ ...input, flows: [...input.flows, { source: 'g', target: 'ok', branch: 'default' }] }, 'default-branch-duplicate', `/flows/${input.flows.length}/branch`)
   const missing = structuredClone(input); delete missing.flows[1].branch
   has(missing, 'condition-state-required', '/flows/1/branch')
   const automatic = structuredClone(input); delete automatic.flows[1].branch; delete automatic.flows[2].branch
@@ -181,7 +240,22 @@ test('two-level subprocesses compose branches, multi-actor services, waits and s
   const nested = load('nested')
   const inner = nested.nodes[1].process.nodes[2].process
   const composite = load('parallel')
-  const { processId: _, ...branches } = load('boolean-branches')
+  const boolean = load('boolean-branches')
+  const branches = { nodes: boolean.nodes, flows: boolean.flows }
+  const rename = (process, prefix) => {
+    const map = new Map(process.nodes.map(node => [node.id, prefix + node.id]))
+    for (const node of process.nodes) {
+      node.id = map.get(node.id)
+      if (node.reminder?.target) node.reminder.target = map.get(node.reminder.target) ?? node.reminder.target
+    }
+    for (const flow of process.flows ?? []) {
+      flow.source = map.get(flow.source) ?? flow.source
+      flow.target = map.get(flow.target) ?? flow.target
+      if (flow.id) flow.id = prefix + flow.id
+    }
+  }
+  rename(composite, 'composite_')
+  rename(branches, 'branches_')
   inner.nodes.splice(2, 0,
     { id: 'parallel', type: 'subProcess', process: { nodes: composite.nodes, flows: composite.flows } },
     { id: 'branches', type: 'subProcess', process: branches },

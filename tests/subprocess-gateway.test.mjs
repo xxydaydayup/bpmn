@@ -5,11 +5,21 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const ts = require('typescript')
+const moduleUrlFor = code => 'data:text/javascript;base64,' + Buffer.from(code).toString('base64')
+const transpile = file => ts.transpileModule(readFileSync(new URL(file, import.meta.url), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText
+const definitionValidationUrl = moduleUrlFor(transpile('../packages/workflow-designer/src/definition-id-validation.ts'))
+const definitionIdsUrl = moduleUrlFor(transpile('../packages/workflow-designer/src/definition-ids.ts')
+  .replace(/from ['"]\.\/definition-id-validation['"]/g, 'from ' + JSON.stringify(definitionValidationUrl)))
 const boundarySource = readFileSync(new URL('../packages/workflow-designer/src/compiler-model.ts', import.meta.url), 'utf8')
 const boundaryCode = ts.transpileModule(boundarySource, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-}).outputText.replace("'@workflow/sdk'", JSON.stringify(new URL('../packages/workflow-sdk/dist/index.js', import.meta.url).href))
-const boundaryUrl = 'data:text/javascript;base64,' + Buffer.from(boundaryCode).toString('base64')
+}).outputText
+  .replace("'@workflow/sdk'", JSON.stringify(new URL('../packages/workflow-sdk/dist/index.js', import.meta.url).href))
+  .replace(/from ['"]\.\/definition-ids['"]/g, 'from ' + JSON.stringify(definitionIdsUrl))
+  .replace(/from ['"]\.\/definition-id-validation['"]/g, 'from ' + JSON.stringify(definitionValidationUrl))
+const boundaryUrl = moduleUrlFor(boundaryCode)
 const source = readFileSync(new URL('../src/api/workflow/subProcessGateway.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
@@ -66,6 +76,51 @@ test('subprocess gateway surfaces backend business errors and rejects empty frag
   await assert.rejects(gateway.get('missing'), /invalid fragment/)
 })
 
+test('fragment editor create and update preserve process form bindings in the saved payload', async () => {
+  const pageSource = readFileSync(new URL('../src/views/SubProcessLibraryView.vue', import.meta.url), 'utf8')
+  const script = pageSource.match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1]
+  const page = ts.createSourceFile('SubProcessLibraryView.ts', script, ts.ScriptTarget.Latest, true)
+  const saveDeclaration = page.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === 'save')
+  assert.ok(saveDeclaration, 'the fragment page must expose its actual save function')
+  const saveCode = ts.transpileModule(saveDeclaration.getText(page), {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const createSave = new Function('dependencies', `
+    const { saving, design, editorRef, editorName, editorDescription, editingKey, subProcessLibraryGateway, router, ElMessage } = dependencies;
+    let lastSavedModel = '';
+    ${saveCode}
+    return save;
+  `)
+  const { createSubProcessLibraryGateway } = await import(moduleUrl)
+  for (const existingKey of ['', 'fragment-existing']) for (const bizFormKey of ['form:fragment@2', undefined]) {
+    const calls = []
+    const model = {
+      processId: 'fragment', processName: '审批片段', ...(bizFormKey !== undefined ? { bizFormKey } : {}),
+      nodes: [{ id: 'nested', type: 'subProcess', process: { bizFormKey: 'form:nested@3', nodes: [{ id: 'review', type: 'approval' }] } }],
+      flows: [], width: 800, height: 480,
+    }
+    const before = structuredClone(model)
+    const gateway = createSubProcessLibraryGateway(async config => {
+      calls.push(config)
+      return { code: 'OK', data: { subProcessKey: existingKey || 'fragment-created', subProcessName: config.data.subProcessName, displayJson: config.data.displayJson } }
+    })
+    const saving = { value: false }
+    const save = createSave({
+      saving, design: { value: { model } }, editorRef: { value: { validate: () => [], exportDesign: () => ({ model }) } },
+      editorName: { value: '审批片段' }, editorDescription: { value: '' }, editingKey: { value: existingKey },
+      subProcessLibraryGateway: gateway, router: { replace: async () => {} },
+      ElMessage: { success() {}, error(message) { throw new Error(message) }, warning(message) { throw new Error(message) }, info(message) { throw new Error(message) } },
+    })
+    await save()
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].method, existingKey ? 'PUT' : 'POST')
+    assert.deepEqual(calls[0].data.displayJson, before)
+    assert.equal(Object.hasOwn(calls[0].data.displayJson, 'bizFormKey'), bizFormKey !== undefined)
+    assert.deepEqual(model, before)
+    assert.equal(saving.value, false)
+  }
+})
+
 test('compiler payload follows recursive bpmn spec and removes designer-only metadata at each level', async () => {
   const { toBpmnCompilerJson } = await import(moduleUrl)
   const model = {
@@ -93,6 +148,6 @@ test('compiler payload follows recursive bpmn spec and removes designer-only met
   assert.equal('width' in outer.process, false)
   const inner = outer.process.nodes[0]
   assert.equal('subProcessKey' in inner, false)
-  assert.deepEqual(Object.keys(inner.process), ['processId', 'nodes', 'flows'])
+  assert.deepEqual(Object.keys(inner.process), ['nodes', 'flows'])
   assert.equal(inner.process.nodes[0].process, undefined)
 })

@@ -126,3 +126,17 @@ test('binding validation checks old snapshots and nested nodes without changing 
   await validateFormBindings({ ...model, nodes: [{ ...node, bizFormKey: undefined }] }, gateway)
   await assert.rejects(validateFormBindings({ ...model, nodes: [{ ...node, type: 'subProcess', process: { nodes: [{ ...node, bizFormKey: 'invalid' }] } }] }, gateway), /引用格式无效/)
 })
+
+test('binding validation checks process-level forms throughout nested subprocesses', async () => {
+  const model = { processId: 'main', nodes: [{ id: 'outer', type: 'subProcess', name: '外层', process: {
+    bizFormKey: 'form:leave@1', nodes: [{ id: 'inner', type: 'subProcess', name: '内层', process: { bizFormKey: 'form:leave@1', nodes: [] } }],
+  } }], flows: [] }
+  const before = structuredClone(model)
+  const keys = []
+  const gateway = { get: async key => { keys.push(key); return record({ status: 'PUBLISHED', version: 4 }) }, history: async () => [{ version: 1 }] }
+  await validateFormBindings(model, gateway)
+  assert.deepEqual(keys, ['leave'])
+  assert.deepEqual(model, before)
+  model.nodes[0].process.nodes[0].process.bizFormKey = 'form:leave@8'
+  await assert.rejects(validateFormBindings(model, gateway), /外层 \/ 内层 \/ 流程级业务表单：表单 v8 发布快照不存在/)
+})

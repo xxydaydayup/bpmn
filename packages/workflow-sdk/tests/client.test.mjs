@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createWorkflowClient, WorkflowClientError } from '@workflow/sdk/client'
-import { defineWorkflow, sequence, approval } from '@workflow/sdk/definition'
+import { defineWorkflow, sequence, approval, subProcess, service } from '@workflow/sdk/definition'
 import { inspectWriteOutcome } from '../examples/write-recovery.mjs'
 
 const definition = defineWorkflow({ key: 'project', name: '项目' }, sequence(approval('review'), approval('archive')))
@@ -56,6 +56,8 @@ test('publish retains backend startability and accepts only compatible legacy op
   assert.equal(published.deploymentId, snapshot.deploymentId)
   assert.equal(calls.at(-1).body.has('startable'), false)
   assert.equal(calls.filter(call => call.path === '/template').length, 1)
+  const omitted = fixture({ '/template': () => ok(snapshot, 201) })
+  assert.equal((await omitted.client.publish(definition)).startable, undefined)
   const unsupported = fixture()
   await assert.rejects(unsupported.client.publish(definition, { startable: false }), error => error.code === 'UNSUPPORTED_PUBLISH_OPTION' && error.operation === 'publish' && error.phase === 'parameters' && error.effect === 'none')
   await assert.rejects(unsupported.client.publish(definition, { startable: 'false' }), code('INVALID_ARGUMENT'))
@@ -130,6 +132,32 @@ test('current countersign passed is a Boolean personal vote with exact nested ac
     if (fieldKey) await assert.rejects(client.complete({ ...task, taskDefinitionKey: input.nodeId }, { variables: { outer_inner_review_passed: false } }), code('PARAMETER_READ_ONLY'))
     await assert.rejects(client.complete({ ...task, taskDefinitionKey: input.nodeId }, { variables: { [input.name]: 'reject' } }), code('PARAMETER_TYPE'))
   }
+})
+
+test('countersign opinions do not predict aggregate branches or require supplied configuration again', async () => {
+  const personal = rule('sign_passed', 'sign', 'countersign', 'complete', 'Boolean', true)
+  const signTask = { ...task, taskDefinitionKey: 'sign' }
+  const nextGateway = { gatewayId: 'result', decisionMode: 'boolean', decisionVariable: personal, branches: [
+    { value: 'pass', decisionValue: true, variables: [archive] },
+    { value: 'reject', decisionValue: false, variables: [] },
+  ] }
+  // An ALL agree can still leave other people waiting; only the engine settles the result.
+  const { client, calls } = fixture({ '/tasks/task%2F1/required-variables': () => ok({ currentComplete: [personal], gatewayDecision: [personal], nextStartHints: [archive], nextGateway }) })
+  await client.complete(signTask, { decision: 'agree' })
+  assert.deepEqual(calls.at(-1).body.variables, { sign_passed: { value: true } })
+  // Omitting an unselected branch is allowed; explicitly clearing its required
+  // configuration must not erase an assignee saved by an earlier signer.
+  for (const assignee of ['', null]) await assert.rejects(client.complete(signTask, { decision: 'agree', nodes: { archive: { assignee } } }), code('PARAMETER_REQUIRED'))
+  const approvers = rule('next_approverList', 'next', 'countersign', 'start', 'Array', true)
+  const list = fixture({ '/tasks/task%2F1/required-variables': () => ok({ currentComplete: [personal], gatewayDecision: [personal], nextStartHints: [approvers], nextGateway: { ...nextGateway, branches: [{ value: 'pass', decisionValue: true, variables: [{ ...approvers, provided: true }] }] } }) })
+  await assert.rejects(list.client.complete(signTask, { decision: 'agree', nodes: { next: { approverList: [] } } }), code('PARAMETER_REQUIRED'))
+  assert.equal(calls.filter(call => call.method === 'POST').length, 1)
+  assert.ok(!list.calls.some(call => call.method === 'POST'))
+  const { client: supplied, calls: suppliedCalls } = fixture({ '/tasks/task%2F1/required-variables': () => ok({ currentComplete: [approved], gatewayDecision: [], nextStartHints: [{ ...archive, provided: true }], nextGateway: { ...nextGateway, decisionVariable: approved, branches: [{ value: 'pass', decisionValue: true, variables: [{ ...archive, provided: true }] }] } }) })
+  await supplied.complete(task, { decision: 'agree' })
+  assert.deepEqual(suppliedCalls.at(-1).body.variables, { review_approved: { value: true } })
+  // provided concerns prior state; an explicitly emptied value must still be rejected.
+  await assert.rejects(supplied.complete(task, { decision: 'agree', nodes: { archive: { assignee: '' } } }), code('PARAMETER_REQUIRED'))
 })
 
 test('passed inputs keep service, engine and other human task results protected', async () => {
@@ -469,4 +497,65 @@ test('parameter mapping failures retain task and business context without submit
   await assert.rejects(client.complete(task, { variables: { review_passed: false } }, { templateSnapshot: snapshot }), error => error.code === 'PARAMETER_READ_ONLY' && error.resources.taskId === task.id)
   await assert.rejects(client.start('project', { businessKey: 'missing-assignee' }), error => error.code === 'PARAMETER_REQUIRED' && error.resources.businessKey === 'missing-assignee' && error.resources.templateKey === 'project' && error.resources.mappedProcessDefinitionId === task.processDefinitionId)
   assert.ok(!calls.some(call => call.method === 'POST'))
+})
+
+test('reminder duration uses exact nested activity rules and protects fixed template values', async () => {
+  const nodeId = 'review_step'
+  const duration = rule(nodeId + '_reminderDuration', nodeId, 'approval', 'start')
+  const model = fixed => defineWorkflow({ key: 'project' }, subProcess('outer_box', subProcess('inner_zone', approval('review_step', { assignee: 'sdk-fixed', reminder: { action: 'end', ...(fixed ? { duration: 'PT1H' } : {}) } })))).toJSON()
+  const configured = fixed => fixture({
+    '/template/project': () => ok({ ...snapshot, displayJson: model(fixed), globalVariables: [duration] }),
+    '/template/project/start-variables': () => ok([duration]),
+  })
+  const dynamic = configured(false)
+  await dynamic.client.start('project', { businessKey: 'runtime-reminder', nodes: { [nodeId]: { reminderDuration: 'PT4S' } } })
+  assert.deepEqual(dynamic.calls.at(-1).body.variables, { [duration.name]: 'PT4S' })
+  const invalid = configured(false)
+  await assert.rejects(invalid.client.start('project', { businessKey: 'invalid-reminder', nodes: { [nodeId]: { reminderDuration: false } } }), code('PARAMETER_TYPE'))
+  const fixed = configured(true)
+  await assert.rejects(fixed.client.start('project', { businessKey: 'fixed-reminder', nodes: { [nodeId]: { reminderDuration: 'PT4S' } } }), code('PARAMETER_READ_ONLY'))
+  const legacy = configured(false)
+  await assert.rejects(legacy.client.start('project', { businessKey: 'legacy-prefix', nodes: { outer_box_inner_zone_review_step: { reminderDuration: 'PT4S' } } }), code('PARAMETER_MAPPING_UNAVAILABLE'))
+  assert.ok(!invalid.calls.some(call => call.method === 'POST'))
+  assert.ok(!fixed.calls.some(call => call.method === 'POST'))
+  assert.ok(!legacy.calls.some(call => call.method === 'POST'))
+})
+
+test('service worker results cannot be supplied at start or through completion fields', async () => {
+  const nodeId = 'invoke_step'
+  const model = defineWorkflow({ key: 'project' }, sequence(approval('review'), subProcess('outer_box', subProcess('inner_zone', service('invoke_step', { countersign: true }))))).toJSON()
+  const serviceSnapshot = { ...snapshot, displayJson: model, globalVariables: [approved] }
+  const configured = () => fixture({ '/template/project': () => ok(serviceSnapshot), '/template/project/start-variables': () => ok([]) })
+  for (const name of [nodeId + '_passed', nodeId + '_result', nodeId + '_result_0', nodeId + '_result_12']) {
+    const start = configured()
+    await assert.rejects(start.client.start('project', { businessKey: 'worker-owned', variables: { [name]: { passed: true } } }), code('PARAMETER_READ_ONLY'))
+    assert.ok(!start.calls.some(call => call.method === 'POST'))
+    for (const source of ['fields', 'variables']) {
+      const complete = configured()
+      await assert.rejects(complete.client.complete(task, { decision: 'agree', [source]: { [name]: false } }, { templateSnapshot: serviceSnapshot }), code('PARAMETER_READ_ONLY'))
+      assert.ok(!complete.calls.some(call => call.method === 'POST'))
+    }
+  }
+  const business = configured()
+  const fields = { result_0: 0, custom_result_0: false, [nodeId + '_result_note']: 'business data' }
+  await business.client.complete(task, { decision: 'agree', fields }, { templateSnapshot: serviceSnapshot })
+  assert.deepEqual(business.calls.at(-1).body.variables, { ...Object.fromEntries(Object.entries(fields).map(([name, value]) => [name, { value }])), review_approved: { value: true } })
+})
+
+test('service configuration preserves object lists and exact aliases while template values stay fixed', async () => {
+  const configs = [['serviceName', 'String'], ['serviceUrl', 'String'], ['serviceList', 'Array'], ['approveMode', 'String'], ['passRate', 'String'], ['sequential', 'Boolean']]
+  const rules = configs.map(([field, type]) => rule('alias_' + field, 'invoke_step', 'service', 'start', type, false, field))
+  const values = { serviceName: 'test-service', serviceUrl: 'https://example.invalid/worker', serviceList: [{ serviceName: 'a', serviceUrl: 'https://example.invalid/a', checked: false, amount: 0 }, { serviceName: 'b' }], approveMode: 'VOTE', passRate: '0.5', sequential: false }
+  const configured = fixed => {
+    const model = defineWorkflow({ key: 'project' }, service('invoke_step', { countersign: true, ...(fixed ? { serviceName: values.serviceName, serviceUrl: values.serviceUrl, mode: 'VOTE', passRate: '0.5', sequential: false } : {}) })).toJSON()
+    return fixture({ '/template/project': () => ok({ ...snapshot, displayJson: model, globalVariables: rules }), '/template/project/start-variables': () => ok([]) })
+  }
+  const dynamic = configured(false)
+  await dynamic.client.start('project', { businessKey: 'service-config', nodes: { invoke_step: values } })
+  assert.deepEqual(dynamic.calls.at(-1).body.variables, Object.fromEntries(Object.entries(values).map(([field, value]) => ['alias_' + field, value])))
+  for (const field of ['serviceName', 'serviceUrl', 'approveMode', 'passRate', 'sequential']) {
+    const fixed = configured(true)
+    await assert.rejects(fixed.client.start('project', { businessKey: 'fixed-config', nodes: { invoke_step: { [field]: values[field] } } }), code('PARAMETER_READ_ONLY'))
+    assert.ok(!fixed.calls.some(call => call.method === 'POST'))
+  }
 })

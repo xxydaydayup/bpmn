@@ -4,16 +4,36 @@ import { createDesignDocument, parseWorkflowInput, workflowIssues } from '../src
 import { cloneWorkflowModelWithFreshNodeIds, createNodeRecord, fromCanvas, toCanvas } from '../src/adapter'
 import { defineWorkflow, approval, subProcess } from '@workflow/sdk/definition'
 import { validateWorkflowModel } from '../src/validation'
-import type { WorkflowModel } from '../src/types'
+import type { WorkflowModel, WorkflowSubProcessModel } from '../src/types'
 import { WORKFLOW_NODE_TYPES } from '../src/contract'
 import { toWorkflowModelInput, toWorkflowCompilerJson } from '../src/compiler-model'
 
-const model = fixture as WorkflowModel
+const model = parseWorkflowInput(fixture as WorkflowModel).model
 
 describe('WorkflowModel v1 public contract', () => {
+  it('preserves subprocess body form bindings through import, copying and compilation', () => {
+    const input = { ...model, bizFormKey: 'form:root@1', nodes: model.nodes.map(node => node.id === 'apply' ? {
+      ...node, type: 'subProcess', process: { processId: 'legacy-child', processName: '旧子流程名称', bizFormKey: 'form:child@2', nodes: [{
+        id: 'nested', type: 'subProcess', name: '嵌套', x: 20, y: 30, process: { bizFormKey: 'form:nested@3', nodes: [{ id: 'review', type: 'approval', name: '审批', x: 20, y: 30 }], flows: [] },
+      }], flows: [] },
+    } : node) } as WorkflowModel
+    const before = structuredClone(input)
+    const imported = parseWorkflowInput(input).model
+    expect(workflowIssues(imported)).toEqual([])
+    for (const candidate of [imported, cloneWorkflowModelWithFreshNodeIds(imported)]) {
+      const compiled = toWorkflowCompilerJson(candidate)
+      expect(compiled.bizFormKey).toBe('form:root@1')
+      expect(compiled.nodes[1]!.process!.bizFormKey).toBe('form:child@2')
+      expect(compiled.nodes[1]!.process!.nodes[0]!.process!.bizFormKey).toBe('form:nested@3')
+      expect(compiled.nodes[1]!.process).not.toHaveProperty('processId')
+      expect(compiled.nodes[1]!.process).not.toHaveProperty('processName')
+    }
+    expect(input).toEqual(before)
+  })
+
   it('round-trips raw, function-built and design models while copying IDs without interpreting bizJson', () => {
     const bizJson = "  中文 \"review\" <&>\nreview_bizJson = 原样  "
-    const functionModel = defineWorkflow({ key: 'nested_data' }, subProcess('outer', subProcess('inner', approval('review', { bizJson }), { bizJson: '内层容器' }), { bizJson: '外层容器' })).toJSON()
+    const functionModel = parseWorkflowInput(defineWorkflow({ key: 'nested_data' }, subProcess('outer', subProcess('inner', approval('review', { bizJson }), { bizJson: '内层容器' }), { bizJson: '外层容器' })).toJSON()).model
     const rawModel = { ...model, nodes: model.nodes.map(node => node.id === 'apply' ? { ...node, bizJson } : node.id === 'minister' ? { ...node, bizJson: '' } : node) }
     for (const input of [rawModel, functionModel]) {
       const parsed = parseWorkflowInput(input)
@@ -23,15 +43,31 @@ describe('WorkflowModel v1 public contract', () => {
       const reimported = parseWorkflowInput(JSON.parse(JSON.stringify(createDesignDocument(roundtrip)))).model
       expect(toWorkflowCompilerJson(reimported)).toEqual(toWorkflowCompilerJson(parsed.model))
       const copy = cloneWorkflowModelWithFreshNodeIds(reimported)
-      const compare = (before: WorkflowModel['nodes'], after: WorkflowModel['nodes'], root = true) => {
-        before.forEach((node, index) => {
-          if (root) expect(after[index]!.id).not.toBe(node.id)
-          else expect(after[index]!.id).toBe(node.id)
-          expect(after[index]!.bizJson).toBe(node.bizJson)
-          if (node.process) compare(node.process.nodes, after[index]!.process!.nodes, false)
+      const copiedIds: string[] = []
+      const compare = (before: WorkflowSubProcessModel, after: WorkflowSubProcessModel) => {
+        expect(after.processId).toBe(before.processId)
+        const idMap = new Map(before.nodes.map((node, index) => [node.id, after.nodes[index]!.id]))
+        before.nodes.forEach((node, index) => {
+          const copied = after.nodes[index]!
+          expect(copied.id).not.toBe(node.id)
+          copiedIds.push(copied.id)
+          expect(copied.bizJson).toBe(node.bizJson)
+          if (node.reminder?.target) expect(copied.reminder?.target).toBe(idMap.get(node.reminder.target))
+          if (node.process) compare(node.process, copied.process!)
+        })
+        ;(before.flows ?? []).forEach((flow, index) => {
+          const copied = after.flows![index]!
+          expect(copied.id).toEqual(expect.any(String))
+          expect(copied.id).not.toBe(flow.id)
+          copiedIds.push(copied.id!)
+          expect(copied.source).toBe(idMap.get(flow.source))
+          expect(copied.target).toBe(idMap.get(flow.target))
+          expect(copied.branch).toBe(flow.branch)
+          expect(copied.conditionExpression).toBe(flow.conditionExpression)
         })
       }
-      compare(reimported.nodes, copy.nodes)
+      compare(reimported, copy)
+      expect(new Set(copiedIds).size).toBe(copiedIds.length)
     }
   })
 
@@ -148,6 +184,75 @@ describe('WorkflowModel v1 public contract', () => {
     const parsed = parseWorkflowInput(backendInput)
     expect(parsed.model).toMatchObject({ processId: 'compact', processName: 'compact', nodes: [{ id: 'approve', name: '', x: 300, y: 80 }], flows: [] })
     expect(parsed.unknownPaths).toEqual([])
+  })
+
+  it('fills missing flow IDs recursively and keeps them stable through design and canvas round-trips', () => {
+    const input = {
+      processId: 'start', processName: '稳定标识',
+      nodes: [
+        { id: 'start', type: 'start' },
+        { id: 'container', type: 'subProcess', process: {
+          processId: 'start',
+          nodes: [{ id: 'first', type: 'approval' }, { id: 'second', type: 'approval' }],
+          flows: [{ id: undefined, source: 'first', target: 'second' }],
+        } },
+        { id: 'end', type: 'end' },
+      ],
+      flows: [{ source: 'start', target: 'container' }, { id: 'keep-flow', source: 'container', target: 'end' }],
+    }
+    const before = structuredClone(input)
+    const parsed = parseWorkflowInput(input).model
+    const inner = parsed.nodes[1]!.process!
+    const ids = [parsed.flows[0]!.id, parsed.flows[1]!.id, inner.flows![0]!.id]
+    expect(ids.every(id => typeof id === 'string' && id.length > 0)).toBe(true)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(parsed.flows[1]!.id).toBe('keep-flow')
+    expect(parsed.nodes.map(node => node.id)).toEqual(['start', 'container', 'end'])
+    expect(inner.nodes.map(node => node.id)).toEqual(['first', 'second'])
+    expect(parsed.processId).toBe('start')
+    expect(inner.processId).toBe('start')
+    const canvas = toCanvas(parsed)
+    const roundtrip = fromCanvas(canvas.nodes, canvas.edges, parsed)
+    const reparsed = parseWorkflowInput(JSON.parse(JSON.stringify(createDesignDocument(roundtrip)))).model
+    expect(reparsed).toEqual(parsed)
+    expect(toWorkflowCompilerJson(reparsed)).toEqual(toWorkflowModelInput(parsed))
+    expect(reparsed.nodes[1]!.process!.processId).toBe('start')
+    expect(input).toEqual(before)
+  })
+
+  it('fills flow IDs for direct compilation while rejecting conflicts across all nested definitions', () => {
+    const input = {
+      processId: 'review', processName: '编译标识',
+      nodes: [
+        { id: 'review', type: 'approval', name: '审批', x: 0, y: 0 },
+        { id: 'container', type: 'subProcess', name: '容器', x: 0, y: 100, process: {
+          processId: 'review',
+          nodes: [{ id: 'inner', type: 'approval', name: '内部审批', x: 0, y: 0 }],
+          flows: [{ source: 'inner', target: 'inner' }],
+        } },
+      ],
+      flows: [{ source: 'review', target: 'container' }],
+    } as WorkflowModel
+    const before = structuredClone(input)
+    const compiled = toWorkflowCompilerJson(input)
+    expect(compiled.flows![0]!.id).toEqual(expect.any(String))
+    expect(compiled.nodes[1]!.process!.flows![0]!.id).toEqual(expect.any(String))
+    expect(compiled.flows![0]!.id).not.toBe(compiled.nodes[1]!.process!.flows![0]!.id)
+    expect(compiled.processId).toBe('review')
+    expect(compiled.nodes[1]!.process).not.toHaveProperty('processId')
+    expect(input).toEqual(before)
+
+    const crossLayer = structuredClone(input)
+    crossLayer.nodes[1]!.process!.nodes[0]!.id = 'review'
+    crossLayer.nodes[1]!.process!.flows = []
+    expect(workflowIssues(crossLayer)).toContainEqual(expect.objectContaining({
+      code: 'duplicate-definition-id', nodeId: 'container', scope: ['container'], path: '/nodes/1/process/nodes/0/id',
+    }))
+    expect(() => toWorkflowCompilerJson(crossLayer)).toThrow()
+    const crossKind = structuredClone(input)
+    crossKind.nodes[1]!.process!.flows![0]!.id = 'review'
+    expect(() => toWorkflowCompilerJson(crossKind)).toThrow()
+    expect(crossKind.nodes[1]!.process!.flows![0]!.id).toBe('review')
   })
 
   it('recognizes and round-trips service countersign properties as business fields', () => {

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { validateWorkflowModel } from '../src/validation'
-import { fromCanvas, toCanvas } from '../src/adapter'
+import { cloneWorkflowModelWithFreshNodeIds, fromCanvas, toCanvas } from '../src/adapter'
+import { parseWorkflowInput } from '../src/contract'
 import { layoutWorkflow } from '../src/layout'
 import { workflowTemplates } from '../src/templates'
 import type { WorkflowModel } from '../src/types'
 
-const basic = workflowTemplates.find(template => template.id === 'parallel-approval')!.model
-const nested = (): WorkflowModel => ({
+const basic = parseWorkflowInput(workflowTemplates.find(template => template.id === 'parallel-approval')!.model).model
+const nested = (): WorkflowModel => parseWorkflowInput({
   ...structuredClone(basic),
   nodes: [...structuredClone(basic.nodes),
     { id: 'innerSplit', type: 'parallel', name: '内层分流', x: 100, y: 300 },
@@ -20,13 +21,14 @@ const nested = (): WorkflowModel => ({
     { source: 'tax', target: 'innerJoin' }, { source: 'risk', target: 'innerJoin' },
     { source: 'innerJoin', target: 'join' },
   ],
-})
+}).model
 
 describe('parallel models through public validation and roundtrip boundaries', () => {
   it('accepts three branches, gateway-to-gateway nesting and roundtrip layout without changing business data', async () => {
-    const model = nested()
-    model.nodes.push({ id: 'audit', type: 'approval', name: '审计', x: 600, y: 450, bizJson: '原样' })
-    model.flows.push({ source: 'split', target: 'audit' }, { source: 'audit', target: 'join' })
+    const input = nested()
+    input.nodes.push({ id: 'audit', type: 'approval', name: '审计', x: 600, y: 450, bizJson: '原样' })
+    input.flows.push({ source: 'split', target: 'audit' }, { source: 'audit', target: 'join' })
+    const model = parseWorkflowInput(input).model
     expect(validateWorkflowModel(model)).toEqual([])
     const canvas = toCanvas(model)
     const arranged = await layoutWorkflow(canvas.nodes, canvas.edges)
@@ -43,10 +45,10 @@ describe('parallel models through public validation and roundtrip boundaries', (
     expect(validateWorkflowModel(unclosed)).toContainEqual(expect.objectContaining({ code: 'parallel-unclosed', nodeId: 'split' }))
     const bypass = nested()
     bypass.flows.push({ source: 'innerJoin', target: 'end' })
-    expect(validateWorkflowModel(bypass)).toContainEqual(expect.objectContaining({ code: 'parallel-bypass', nodeId: 'split' }))
+    expect(validateWorkflowModel(parseWorkflowInput(bypass).model)).toContainEqual(expect.objectContaining({ code: 'parallel-bypass', nodeId: 'split' }))
     const crossing = structuredClone(basic)
     crossing.flows.push({ source: 'finance', target: 'legal' })
-    expect(validateWorkflowModel(crossing).some(issue => issue.code === 'parallel-check-scope' && issue.severity === 'warning')).toBe(true)
+    expect(validateWorkflowModel(parseWorkflowInput(crossing).model).some(issue => issue.code === 'parallel-check-scope' && issue.severity === 'warning')).toBe(true)
   })
 
   it('limits static claims for legal choices inside a parallel and preserves ordinary cycle rules', () => {
@@ -54,18 +56,19 @@ describe('parallel models through public validation and roundtrip boundaries', (
     model.nodes.push({ id: 'choice', type: 'condition', name: '条件', x: 20, y: 20 })
     model.flows = model.flows.filter(flow => flow.source !== 'finance')
     model.flows.push({ source: 'finance', target: 'choice' }, { source: 'choice', target: 'join', conditionExpression: 'amount > 1' }, { source: 'choice', target: 'legal', branch: 'default' })
-    const issues = validateWorkflowModel(model)
+    const issues = validateWorkflowModel(parseWorkflowInput(model).model)
     expect(issues).toContainEqual(expect.objectContaining({ code: 'parallel-check-scope', severity: 'warning' }))
     expect(issues.filter(issue => issue.code.startsWith('parallel-') && issue.severity !== 'warning')).toEqual([])
     model.flows.push({ source: 'archive', target: 'apply' })
-    expect(validateWorkflowModel(model)).toContainEqual(expect.objectContaining({ code: 'cycle' }))
+    expect(validateWorkflowModel(parseWorkflowInput(model).model)).toContainEqual(expect.objectContaining({ code: 'cycle' }))
   })
 
   it('checks recursive regions in their own scope and locates errors on the outer container', () => {
     const child = nested()
     child.flows = child.flows.map(flow => flow.source === 'risk' ? { ...flow, target: 'end' } : flow)
+    const independentChild = cloneWorkflowModelWithFreshNodeIds(child)
     const model = structuredClone(basic)
-    model.nodes[1] = { ...model.nodes[1]!, type: 'subProcess', process: { nodes: child.nodes, flows: child.flows } }
+    model.nodes[1] = { ...model.nodes[1]!, type: 'subProcess', process: { nodes: independentChild.nodes, flows: independentChild.flows } }
     expect(validateWorkflowModel(model)).toContainEqual(expect.objectContaining({ code: 'parallel-unclosed', nodeId: 'apply', scope: ['apply'] }))
   })
 })

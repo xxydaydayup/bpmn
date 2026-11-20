@@ -9,7 +9,8 @@ import { cloneWorkflowModelWithFreshNodeIds, createWorkflowNodeId, normalizeLega
 import { layoutWorkflow } from '../src/layout'
 import { workflowTemplates } from '../src/templates'
 import fixture from '../src/fixtures/project-approval.json'
-import type { WorkflowModel } from '../src/types'
+import type { WorkflowModel, WorkflowSubProcessModel } from '../src/types'
+import { parseWorkflowInput } from '../src/contract'
 import { toWorkflowCompilerJson } from '../src/compiler-model'
 
 vi.mock('@vue-flow/core', async () => {
@@ -40,8 +41,8 @@ vi.mock('@vue-flow/core', async () => {
   }
 })
 
-const validModel = fixture as WorkflowModel
-const parallelModel: WorkflowModel = {
+const validModel = parseWorkflowInput(fixture as WorkflowModel).model
+const parallelModel: WorkflowModel = parseWorkflowInput({
   processId: 'parallel_approval', processName: '并行审批',
   nodes: [
     { id: 'start', type: 'start', name: '开始', x: 280, y: 20 },
@@ -59,6 +60,28 @@ const parallelModel: WorkflowModel = {
     { source: 'finance', target: 'join' }, { source: 'legal', target: 'join' },
     { source: 'join', target: 'archive' }, { source: 'archive', target: 'end' },
   ],
+} as WorkflowModel).model
+
+function expectUniqueDefinitions(process: WorkflowModel | WorkflowSubProcessModel) {
+  const ids: string[] = []
+  const visit = (scope: WorkflowModel | WorkflowSubProcessModel) => {
+    const local = new Set(scope.nodes.map(node => node.id))
+    for (const node of scope.nodes) {
+      expect(node.id).toEqual(expect.any(String))
+      ids.push(node.id)
+      if (node.reminder?.target) expect(local.has(node.reminder.target)).toBe(true)
+      if (node.type === 'subProcess' && node.process) visit(node.process)
+    }
+    for (const edge of scope.flows ?? []) {
+      expect(edge.id).toEqual(expect.any(String))
+      ids.push(edge.id!)
+      expect(local.has(edge.source)).toBe(true)
+      expect(local.has(edge.target)).toBe(true)
+    }
+  }
+  visit(process)
+  expect(new Set(ids).size).toBe(ids.length)
+  return ids
 }
 
 describe('public WorkflowDesigner behavior', () => {
@@ -96,12 +119,18 @@ describe('public WorkflowDesigner behavior', () => {
     expect((copy.vm as unknown as { validate: () => unknown[] }).validate()).toEqual([])
     const source = { key: 'parallel-fragment', name: '并行片段', displayJson: { nodes: saved.model.nodes, flows: saved.model.flows } }
     const input = structuredClone(parallelModel)
-    input.nodes[1] = { ...input.nodes[1]!, type: 'subProcess', process: { nodes: [{ id: 'inner', name: '递归容器', type: 'subProcess', x: 100, y: 100, process: source.displayJson }], flows: [] } }
+    const originalSource = structuredClone(source)
+    const copiedProcess = cloneWorkflowModelWithFreshNodeIds({ nodes: [{ id: 'inner', name: '递归容器', type: 'subProcess', x: 100, y: 100, process: source.displayJson }], flows: [] })
+    input.nodes[1] = { ...input.nodes[1]!, type: 'subProcess', process: copiedProcess }
     const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
     const host = mount(WorkflowDesigner, { props: { modelValue: input, compile } })
     await (host.vm as unknown as { compile: () => Promise<unknown> }).compile()
     expect(compile).toHaveBeenCalledOnce()
-    expect(toWorkflowCompilerJson(compile.mock.calls[0]![0])).toMatchObject({ nodes: expect.arrayContaining([expect.objectContaining({ type: 'subProcess', process: { nodes: expect.arrayContaining([expect.objectContaining({ process: { nodes: expect.arrayContaining([expect.objectContaining({ type: 'parallel' })]), flows: source.displayJson.flows } })]), flows: [] } })]) })
+    const compiled = toWorkflowCompilerJson(compile.mock.calls[0]![0])
+    expectUniqueDefinitions(compiled)
+    expect(compiled.nodes[1]?.process).toEqual(copiedProcess)
+    expect(compiled.nodes[1]?.process?.nodes[0]?.process?.nodes).toContainEqual(expect.objectContaining({ type: 'parallel', name: '片段并行分流' }))
+    expect(source).toEqual(originalSource)
     wrapper.unmount(); copy.unmount(); host.unmount()
   })
 
@@ -121,12 +150,12 @@ describe('public WorkflowDesigner behavior', () => {
     expect(clear().attributes('disabled')).toBeDefined()
     await wrapper.setProps({ readonly: false })
     await clear().trigger('click')
-    expect(api.exportDesign().model.flows[2]).toEqual({ source: 'split', target: 'finance' })
+    expect(api.exportDesign().model.flows[2]).toEqual(parallelModel.flows[2])
     await api.compile(); expect(compile).toHaveBeenCalledOnce()
     await wrapper.get('button[aria-label="撤销"]').trigger('click')
     expect(api.exportDesign().model.flows[2]).toMatchObject(conditions)
     await wrapper.get('button[aria-label="重做"]').trigger('click')
-    expect(api.exportDesign().model.flows[2]).toEqual({ source: 'split', target: 'finance' })
+    expect(api.exportDesign().model.flows[2]).toEqual(parallelModel.flows[2])
     wrapper.unmount()
   })
 
@@ -173,7 +202,7 @@ describe('public WorkflowDesigner behavior', () => {
     await wrapper.findAll('.vue-flow__edge')[2]!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === '清除并行出线条件')!.trigger('click')
     const api = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; compile: () => Promise<unknown> }
-    expect(api.exportDesign().model.flows[2]).toEqual({ source: 'split', target: 'finance', future: { keep: true } })
+    expect(api.exportDesign().model.flows[2]).toEqual({ ...parallelModel.flows[2], future: { keep: true } })
     await api.compile(); expect(compile).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -207,8 +236,10 @@ describe('public WorkflowDesigner behavior', () => {
     await flow.vm.$emit('connect', { source: 'split', target: 'finance' })
     await flow.vm.$emit('connect', { source: 'split', target: 'legal' })
     expect(exported().model.flows.filter(edge => edge.source === 'split')).toEqual([
-      { source: 'split', target: 'finance' }, { source: 'split', target: 'legal' },
+      { id: expect.stringMatching(/^flow_[0-9a-f]{32}$/), source: 'split', target: 'finance' },
+      { id: expect.stringMatching(/^flow_[0-9a-f]{32}$/), source: 'split', target: 'legal' },
     ])
+    expectUniqueDefinitions(exported().model)
     expect(wrapper.get('.wfd-inspector select').attributes('disabled')).toBeDefined()
     expect(wrapper.get('.wfd-inspector textarea').attributes('disabled')).toBeDefined()
     await wrapper.findAll('.vue-flow__node')[2]!.trigger('click')
@@ -311,7 +342,7 @@ describe('public WorkflowDesigner behavior', () => {
     const fragment = {
       key: 'fragment-budget', name: '预算审批', description: '预算路径',
       displayJson: {
-        processId: 'budget-fragment', processName: '预算审批',
+        processId: 'budget-fragment', processName: '预算审批', bizFormKey: 'form:budget@2',
         nodes: [
           { id: 'inner', type: 'approval', name: '部门审批', x: 10, y: 20, reminder: { action: 'return', target: 'inner2' } },
           { id: 'inner2', type: 'approval', name: '负责人审批', x: 10, y: 140 },
@@ -336,14 +367,23 @@ describe('public WorkflowDesigner behavior', () => {
     await vi.waitFor(() => expect(subprocessFragments.get).toHaveBeenCalledWith('fragment-budget'))
     const getNode = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')!
     await vi.waitFor(() => expect(getNode().subProcessKey).toBe('fragment-budget'))
-    expect(getNode().process).toEqual({ processId: 'budget-fragment', processName: '预算审批', nodes: fragment.displayJson.nodes, flows: fragment.displayJson.flows })
+    const snapshot = structuredClone(getNode().process!)
+    expect(snapshot).toMatchObject({ processId: 'budget-fragment', processName: '预算审批', bizFormKey: 'form:budget@2' })
+    expect(snapshot.nodes.map(node => node.id)).not.toEqual(fragment.displayJson.nodes.map(node => node.id))
+    expect(snapshot.flows![0]!.id).not.toBe('flow-inner')
+    expect(snapshot.nodes[0]!.reminder?.target).toBe(snapshot.nodes[1]!.id)
+    expectUniqueDefinitions(snapshot)
+    expect(fragment.displayJson.nodes.map(node => node.id)).toEqual(['inner', 'inner2'])
+    expect(fragment.displayJson.nodes[0]!.reminder?.target).toBe('inner2')
     await wrapper.find('button[aria-label="撤销"]').trigger('click')
     expect(getNode().process).toBeUndefined()
     await wrapper.find('button[aria-label="重做"]').trigger('click')
-    expect(getNode().process).toEqual({ processId: 'budget-fragment', processName: '预算审批', nodes: fragment.displayJson.nodes, flows: fragment.displayJson.flows })
+    expect(getNode().process).toEqual(snapshot)
     await (wrapper.vm as unknown as { compile: () => Promise<unknown> }).compile()
     await vi.waitFor(() => expect(compile).toHaveBeenCalledOnce())
-    expect((compile.mock.calls[0]![0] as WorkflowModel).nodes.find(node => node.id === 'minister')?.process).toEqual({ processId: 'budget-fragment', processName: '预算审批', nodes: fragment.displayJson.nodes, flows: fragment.displayJson.flows })
+    expect((compile.mock.calls[0]![0] as WorkflowModel).nodes.find(node => node.id === 'minister')?.process).toEqual(snapshot)
+    expect(toWorkflowCompilerJson(compile.mock.calls[0]![0]).nodes.find(node => node.id === 'minister')?.process).toEqual({ nodes: snapshot.nodes, flows: snapshot.flows, bizFormKey: 'form:budget@2' })
+    wrapper.unmount()
   })
 
   it('edits and exports fragment business data, reuses its snapshot and refreshes only explicitly', async () => {
@@ -384,24 +424,35 @@ describe('public WorkflowDesigner behavior', () => {
     await vi.waitFor(() => expect(wrapper.find('.wfd-subprocess-select-field option[value="business-fragment"]').exists()).toBe(true))
     await wrapper.get('.wfd-subprocess-select-field select').setValue('business-fragment')
     await vi.waitFor(() => expect(container().process?.nodes[0]?.bizJson).toBe(bizJson))
+    const firstId = container().process!.nodes[0]!.id
+    expect(firstId).toMatch(/^approval_[0-9a-f]{32}$/)
     expect(container().bizJson).toBe('容器默认值')
-    fragment.displayJson.nodes[0]!.bizJson = '片段库新版'
-    expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const refresh = wrapper.findAll('button').find(button => button.text() === '刷新快照')!
+    const unchanged = JSON.parse(JSON.stringify(vm.exportDesign()))
+    await refresh.trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('片段库内容没有变化'))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(vm.exportDesign()).toEqual(unchanged)
+    fragment.displayJson.nodes[0]!.bizJson = '片段库新版'
+    expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
     await refresh.trigger('click')
     await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce())
     expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
     confirm.mockReturnValue(true)
     await refresh.trigger('click')
     await vi.waitFor(() => expect(container().process?.nodes[0]?.bizJson).toBe('片段库新版'))
+    const refreshedId = container().process!.nodes[0]!.id
+    expect(refreshedId).not.toBe(firstId)
     expect(container().bizJson).toBe('容器默认值')
     await wrapper.get('button[aria-label="撤销"]').trigger('click')
     expect(container().process?.nodes[0]?.bizJson).toBe(bizJson)
+    expect(container().process?.nodes[0]?.id).toBe(firstId)
     await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(container().process?.nodes[0]?.id).toBe(refreshedId)
     const restored = mount(WorkflowDesigner, { props: { modelValue: JSON.parse(JSON.stringify(vm.exportDesign())), compile } })
     await (restored.vm as unknown as { compile: () => Promise<unknown> }).compile()
-    expect(compile.mock.calls[0]![0].nodes[1]).toMatchObject({ bizJson: '容器默认值', process: { nodes: [expect.objectContaining({ id: 'review', bizJson: '片段库新版' })] } })
+    expect(compile.mock.calls[0]![0].nodes[1]).toMatchObject({ bizJson: '容器默认值', process: { nodes: [expect.objectContaining({ id: refreshedId, bizJson: '片段库新版' })] } })
     expect(toWorkflowCompilerJson(compile.mock.calls[0]![0]).nodes[1]).not.toHaveProperty('subProcessKey')
     confirm.mockRestore(); restored.unmount(); wrapper.unmount(); fragmentEditor.unmount()
   })
@@ -413,7 +464,11 @@ describe('public WorkflowDesigner behavior', () => {
       flows: [],
     }
     const subprocessFragments = { list: vi.fn().mockResolvedValue([{ key: 'outer-key', name: '外层', displayJson: nested }]), get: vi.fn().mockResolvedValue({ key: 'outer-key', name: '外层', displayJson: nested }) }
-    const model = { ...validModel, nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, type: 'subProcess', name: '外层' } : node) } as WorkflowModel
+    const model = {
+      ...validModel,
+      nodes: validModel.nodes.map(node => node.id === 'minister' ? { ...node, type: 'subProcess', name: '外层' } : node),
+      flows: validModel.flows.map(edge => edge.source === 'gwMinister' ? { ...edge, conditionExpression: edge.branch === 'reject' ? '${false}' : '${true}' } : edge),
+    } as WorkflowModel
     const wrapper = mount(WorkflowDesigner, { props: { modelValue: model, extensions: { subprocessFragments } } })
     await wrapper.findAll('.vue-flow__node')[model.nodes.findIndex(node => node.id === 'minister')]!.trigger('click')
     await vi.waitFor(() => expect(subprocessFragments.list).toHaveBeenCalled())
@@ -421,7 +476,84 @@ describe('public WorkflowDesigner behavior', () => {
 
     const embedded = () => (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model.nodes.find(node => node.id === 'minister')!
     await vi.waitFor(() => expect(embedded().subProcessKey).toBe('outer-key'))
-    expect(embedded().process).toEqual({ processId: 'outer-fragment', processName: '外层', nodes: nested.nodes, flows: [] })
+    const snapshot = embedded().process!
+    expect(snapshot).toMatchObject({ processId: 'outer-fragment', processName: '外层', flows: [] })
+    expect(snapshot.nodes[0]!.id).toMatch(/^subProcess_[0-9a-f]{32}$/)
+    expect(snapshot.nodes[0]!.process!.nodes[0]!.id).toMatch(/^approval_[0-9a-f]{32}$/)
+    expectUniqueDefinitions(snapshot)
+    expect(nested.nodes[0]!.id).toBe('inner-sub')
+    expect(nested.nodes[0]!.process.nodes[0]!.id).toBe('approval-1')
+    const exported = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    const compiledProcess = toWorkflowCompilerJson(exported).nodes.find(node => node.id === 'minister')!.process!
+    expect(Object.keys(compiledProcess).sort()).toEqual(['flows', 'nodes'])
+    expect(Object.keys(compiledProcess.nodes[0]!.process!).sort()).toEqual(['flows', 'nodes'])
+    expect(compiledProcess.nodes[0]).not.toHaveProperty('subProcessKey')
+    wrapper.unmount()
+  })
+
+  it('inserts the same nested fragment twice with unique definitions and stable history, references and exports', async () => {
+    const fragment = {
+      key: 'nested-shared', name: '可复用嵌套审批', displayJson: {
+        processId: 'fragment-metadata', processName: '片段名称',
+        nodes: [
+          { id: 'review', type: 'approval', name: '内部审批', x: 10, y: 10, reminder: { action: 'return', target: 'nested' }, bizJson: 'review 保持原文' },
+          { id: 'nested', type: 'subProcess', name: '嵌套容器', x: 10, y: 120, process: {
+            processId: 'inner-metadata',
+            nodes: [
+              { id: 'review', type: 'approval', name: '嵌套审批', x: 10, y: 10, reminder: { action: 'return', target: 'finish' } },
+              { id: 'finish', type: 'approval', name: '嵌套复核', x: 10, y: 120 },
+            ], flows: [{ id: 'same-flow', source: 'review', target: 'finish' }],
+          } },
+        ], flows: [{ id: 'same-flow', source: 'review', target: 'nested' }],
+      },
+    }
+    const original = structuredClone(fragment)
+    const subprocessFragments = { list: vi.fn().mockResolvedValue([fragment]), get: vi.fn().mockResolvedValue(fragment) }
+    const input = {
+      processId: 'review', processName: '两次引用',
+      nodes: [
+        { id: 'start', type: 'start', name: '开始', x: 10, y: 10 },
+        { id: 'left', type: 'subProcess', name: '第一次', x: 10, y: 120 },
+        { id: 'right', type: 'subProcess', name: '第二次', x: 10, y: 240 },
+        { id: 'end', type: 'end', name: '结束', x: 10, y: 360 },
+      ], flows: [{ source: 'start', target: 'left' }, { source: 'left', target: 'right' }, { source: 'right', target: 'end' }],
+    } as WorkflowModel
+    const compile = vi.fn().mockResolvedValue({ bpmnXml: '<definitions />' })
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input, compile, extensions: { subprocessFragments } } })
+    const api = wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel }; compile: () => Promise<unknown>; validate: () => unknown[] }
+    for (const index of [1, 2]) {
+      await wrapper.findAll('.vue-flow__node')[index]!.trigger('click')
+      await vi.waitFor(() => expect(wrapper.find('.wfd-subprocess-select-field option[value="nested-shared"]').exists()).toBe(true))
+      await wrapper.get('.wfd-subprocess-select-field select').setValue('nested-shared')
+      await vi.waitFor(() => expect(api.exportDesign().model.nodes[index]!.subProcessKey).toBe('nested-shared'))
+    }
+    const saved = JSON.parse(JSON.stringify(api.exportDesign()))
+    expectUniqueDefinitions(saved.model)
+    expect(api.validate()).toEqual([])
+    expect(saved.model.processId).toBe('review')
+    for (const container of saved.model.nodes.slice(1, 3)) {
+      expect(container.process.nodes[0].bizJson).toBe('review 保持原文')
+      expect(container.process.nodes[0].reminder.target).toBe(container.process.nodes[1].id)
+      const inner = container.process.nodes[1].process
+      expect(inner.nodes[0].reminder.target).toBe(inner.nodes[1].id)
+    }
+    expect(fragment).toEqual(original)
+    await wrapper.get('button[aria-label="撤销"]').trigger('click')
+    expect(api.exportDesign().model.nodes[2]!.process).toBeUndefined()
+    expect(api.exportDesign().model.nodes[1]).toEqual(saved.model.nodes[1])
+    await wrapper.get('button[aria-label="重做"]').trigger('click')
+    expect(api.exportDesign().model).toEqual(saved.model)
+    const reopened = mount(WorkflowDesigner, { props: { modelValue: saved, compile } })
+    const reopenedApi = reopened.vm as unknown as typeof api
+    expect(reopenedApi.exportDesign().model).toEqual(saved.model)
+    await reopenedApi.compile()
+    expect(compile).toHaveBeenCalledWith(saved.model)
+    const compilerJson = toWorkflowCompilerJson(compile.mock.calls[0]![0])
+    expectUniqueDefinitions(compilerJson)
+    expect(compilerJson.nodes[1]!.process).not.toHaveProperty('processId')
+    expect(compilerJson.nodes[1]!.process!.nodes[1]!.process).not.toHaveProperty('processId')
+    expect(compilerJson.nodes[1]!.process!.nodes[0]!.id).toBe(saved.model.nodes[1].process.nodes[0].id)
+    reopened.unmount(); wrapper.unmount()
   })
 
   it('appends host validation while preserving built-in validation and custom inspector overrides', async () => {

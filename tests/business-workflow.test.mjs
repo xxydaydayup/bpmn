@@ -21,7 +21,7 @@ let code = compiled
   .replace(/from ['"]vue['"]/g, 'from ' + JSON.stringify(vueUrl))
   .replace(/from ['"]axios['"]/g, 'from ' + JSON.stringify(axiosUrl))
   .replace(/import \{[^}]+\} from ['"]@\/api\/workflow\/nodeForms['"];?/, 'const { buildNodeFormConfigs, compileStartFormVariables, formSuggestionPreview, formValueKey, initialFormValues, startVariableName, validateFormValues, variablesWithEngineValues } = await import(' + JSON.stringify(formHelpersModuleUrl) + ');')
-  .replace(/import \{ businessWorkflowGateway \} from ['"]@\/api\/workflow\/gateway['"];?/, 'const businessWorkflowGateway = {};')
+  .replace(/import \{ businessWorkflowGateway \} from ['"]@\/api\/workflow\/sdkGateway['"];?/, 'const businessWorkflowGateway = {};')
 const { effectScope } = await import(vueUrl)
 const { useBusinessWorkflow } = await import(moduleUrl(code))
 const { buildNodeFormConfigs, compileStartFormVariables, formSuggestionPreview, formValueKey, initialFormValues, startVariableName, validateFormValues } = await import(formHelpersModuleUrl)
@@ -586,4 +586,61 @@ test('node-mapped completion submits only the current task node and keeps its dr
     workflow.dispose()
     scope.stop()
   }
+})
+
+test('SDK submission keeps the actual task version, false/zero draft, conflict recovery and busy guard', async () => {
+  const task = { id: 'sdk-task', processInstanceId: 'sdk-instance', processDefinitionId: 'old-definition', taskDefinitionKey: 'sign', assignee: 'alice' }
+  const writes = []
+  let refreshes = 0
+  let rejectWrite
+  const scope = effectScope()
+  const workflow = scope.run(() => useBusinessWorkflow({
+    listTasks: async () => { refreshes++; return [task] },
+    completeWithSdk: async (reference, input) => {
+      writes.push({ reference, input })
+      await new Promise((_, reject) => { rejectWrite = reject })
+    },
+  }))
+  try {
+    workflow.openComplete(task)
+    workflow.setCompleteVariablesText('{"checked":false,"amount":0}')
+    const pending = workflow.completeSelectedTaskWithSdk('reject')
+    assert.equal(workflow.completing.value, true)
+    await workflow.completeSelectedTaskWithSdk('agree')
+    assert.equal(writes.length, 1)
+    assert.equal(writes[0].reference.processDefinitionId, 'old-definition')
+    assert.deepEqual(writes[0].input, { decision: 'reject', variables: { checked: false, amount: 0 } })
+    rejectWrite(Object.assign(new Error('changed'), { httpStatus: 409 }))
+    await pending
+    assert.equal(workflow.selectedTask.value.id, task.id)
+    assert.equal(workflow.completeVariablesText.value, '{"checked":false,"amount":0}')
+    assert.equal(refreshes, 1)
+    assert.match(workflow.error.value, /任务状态已变化/)
+    assert.equal(workflow.completing.value, false)
+  } finally { workflow.dispose(); scope.stop() }
+})
+
+
+test('task queries cancel prior requests and ignore stale or disposed results', async () => {
+  const pending = []
+  const scope = effectScope()
+  const workflow = scope.run(() => useBusinessWorkflow({
+    listTasks: (_query, signal) => new Promise(resolve => pending.push({ signal, resolve })),
+  }))
+  try {
+    const first = workflow.loadTasks()
+    const second = workflow.loadTasks()
+    assert.equal(pending[0].signal.aborted, true)
+    pending[1].resolve([{ id: 'new' }])
+    await second
+    pending[0].resolve([{ id: 'stale' }])
+    await first
+    assert.equal(workflow.tasks.value[0].id, 'new')
+    const third = workflow.loadTasks()
+    workflow.dispose()
+    assert.equal(pending[2].signal.aborted, true)
+    pending[2].resolve([{ id: 'disposed' }])
+    await third
+    assert.equal(workflow.tasks.value[0].id, 'new')
+  } finally { workflow.dispose(); scope.stop() }
 })

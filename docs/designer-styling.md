@@ -2,6 +2,14 @@
 
 这套界面沿用 Vue、Element Plus 和 bpmn-js；人工/服务任务采用业务卡片，图标为本地 Tabler Icons 3.47.0。本地 SVG 来源目录为 `src/assets/tabler/`，许可和来源记录见该目录的 `README.md`。独立的 Vue Flow 业务设计器使用 `@tabler/icons-vue` 同版本图标组件，映射位于 `packages/workflow-designer/src/WorkflowDesigner.vue` 和 `packages/workflow-designer/src/nodes/WorkflowNode.vue`，不与 BPMN 模块共享运行时组件。画布支持顶部工具栏切换预设主题；主题只影响运行时展示，页面暂未开放逐节点改色功能。
 
+Vue Flow 业务工作流画布提供低对比度点阵背景和按节点类型着色的小地图；小地图在桌面支持点击定位和拖动视口，在窄屏隐藏。当前选中的顺序流显示轻量流向动画；系统启用减少动态效果时关闭动画并保留静态选中强调。内置条件/驳回示例通过 WorkflowModel 已有的节点坐标展示路径关系；应用模板后适应新图完整边界。当前画布不提供网格吸附、逐条连线样式或自动布局方向切换。
+
+| Vue Flow 业务画布需求 | 入口 |
+| --- | --- |
+| 背景网格、小地图和窄屏显示规则 | packages/workflow-designer/src/WorkflowDesigner.vue、packages/workflow-designer/src/style.css |
+| 选中顺序流方向动画 | packages/workflow-designer/src/edges/WorkflowEdge.vue、packages/workflow-designer/src/style.css |
+| 内置示例的分支坐标 | packages/workflow-designer/src/templates.ts、packages/workflow-designer/src/fixtures/project-approval.json |
+
 ## 修改入口
 
 | 需求 | 文件与配置 |

@@ -12,6 +12,23 @@ const compile = (model: WorkflowModel) => hostApi.post('/v1/bpmn/json2xml', mode
 
 宿主需提供 Vue 3 和 @vue-flow/core。组件通过 v-model 交换版本化设计稿；旧裸 v1 模型可直接导入。未知业务字段/节点会原样保留并阻止编译；无法识别的未来设计稿以只读方式导出原对象。可通过 extensions 提供已知节点的默认值、画布节点组件、属性编辑器、连接规则、校验、节点库过滤和主题，并通过插槽定制工具栏、节点库页脚、画布覆盖层及属性面板页脚。
 
+## 只读业务流程预览
+
+`WorkflowPreview` 是独立的单向展示入口，可接收已发布快照的 `displayJson` 对象或 JSON 字符串。组件不取数、不编译、不保存，也不改变输入对象；宿主负责加载、鉴权、版本解析以及同一定义版本的 BPMN XML 备用视图。
+
+```vue
+<WorkflowPreview
+  :model="template.displayJson"
+  :metadata="{ name: template.name, key: template.key, version: template.version, processDefinitionId: template.processDefinitionId }"
+  :node-states="{ approval: 'active' }"
+  @error="handleUnavailableModel"
+/>
+```
+
+从 `@workflow/designer` 导入 `WorkflowPreview`，并沿用 `@workflow/designer/style.css`。`metadata` 和 `nodeStates` 均可省略；节点状态支持 `active`、`completed`、`canceled`，以文字和颜色同时区分。`ready` 事件提供 `{ nodeIds: string[] }`，`error` 与 `warning` 事件提供中文说明字符串。无法匹配外层节点的活动会显示提示，不推断连线执行轨迹。子流程只展示容器与步骤数量，不提供内部导航。
+
+预览沿用已有坐标，缺少坐标时仅为内部副本生成临时布局；未知类型保留名称、原始类型和连接，并提示能力限制。空/重复定义 ID、悬空连线、无节点或不支持的结构会清除旧图并报告错误。查看交互限于缩放、平移与适应画布；切换输入或卸载后，迟到布局不会覆盖新图。此入口验证业务模型的显示行为，不生成或修改 XML，也不代表后端执行、身份代理或租户授权已通过验证。
+
 画布提供 Vue Flow 点阵背景与小地图，小地图可点击定位并拖动视口，窄屏时隐藏。选中顺序流时显示轻量方向动画，尊重系统减少动态效果设置；动画不进入 WorkflowModel 或编译输入。应用流程模板后会清除先前视口，并在新图渲染后适应完整流程。内置分支示例坐标用于展示既有通过、驳回和回流关系，不改变业务拓扑。
 
 ## 端到端链路

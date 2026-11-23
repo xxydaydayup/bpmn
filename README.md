@@ -73,7 +73,9 @@ SDK 0.2.0 新增 `@workflow/sdk/definition` 函数定义入口与 `@workflow/sdk
 - Camunda REST 管理台：`/camunda-console` 提供运行总览、部署与定义查询、定义/实例挂起恢复、实例终止、活动树与变量查看、任务与 External Task 查询、Job/Incident 异常查看、历史查询、JSON 导出和 Camunda 用户操作日志；页面直接调用官方 REST，仅用于开发联调。
 - 流程验证工作台：在 `/camunda-validation` 选择串行审批或金额分支审批，自动部署唯一测试版本、启动并完成人工任务、核对历史和断言；默认级联清理测试部署，可按需保留数据。
 - 后端业务流程页：`/workflow-business` 通过 `/api/v1` 浏览任务模板、查看当前模板详情和流程图、删除模板、启动业务任务实例、查询和完成人工任务，并支持将任务退回待重派或重派给指定办理人；开发模式可用 Camunda 状态核对业务返回。
+  - 模板详情优先使用 `displayJson` 绘制只读业务图；模型缺失或无效时明确提示，并可显式查看同次响应的 BPMN XML 备用图。实例预览严格匹配实际流程定义 ID 的历史快照，提供当前活动或已结束实例的完成/取消标记。
   - 模板暂停状态由 `suspended` 控制；当前接口省略 `startable` 时按可发起处理，兼容旧接口明确返回 `startable: false` 时禁止发起。启动仍需填写业务键并通过相应入口的参数校验。
+- 独立嵌入页 `/workflow-preview?templateKey=...` 或 `?processInstanceId=...` 共用只读图，不显示工作台导航、变量或表单；支持同源子路径。组件使用见[预览说明](docs/workflow-preview.md)，代理、当前用户授权和 CSP 责任见[嵌入指南](docs/workflow-preview-embedding.md)。生产权限和嵌入来源策略仍需实际网关验收。
 - 业务流程页按节点类型和阶段生成启动/办理字段，同时保留全局 variables JSON 调试入口。用户可分别选择旧接口的 variables 方式或新接口的按节点映射方式：启动调用 start 或 start_biz，完成当前人工任务调用 complete 或 complete_biz。新方式将节点 ID、类型及字段值放入 nodes，由后端拼接全局变量名；启动时 nodes 与 variables 同名字段以 nodes 为准，完成时只提交当前任务节点。消息等待与定时等待的未固定参数仍使用后端约定的 `{nodeId}_messageName` 和必填 `{nodeId}_timerValue`。
   - Vue 工作流设计器通过宿主编译回调调用 /api/v1/bpmn/json2xml 生成 BPMN XML；“发布任务模板”使用现有 /api/v1/template 业务接口，显示模板版本与部署/流程定义标识。内置流程模板包含后端已部署的 `msg-wait:1:31189f2a-d9ae-11f1-b314-00155d21c8ae`（固定消息名 `msg_wait_name`）和 `timer01:1:32ead321-d9a4-11f1-b314-00155d21c8ae`（固定等待时长 `PT1M`）。部署时引擎后端从编译产物推导全局变量 params_rules，声明流程进行到某一节点时需要的传参；业务 JSON、params_rules 与启动传参的完整对照示例见 [立项申请示例](./packages/workflow-designer/docs/examples/立项申请/立项申请.js)。它不直接部署到 Camunda 引擎，仍与 /designer 的 BPMN/XML 编辑器和引擎验证发布能力区分。新增的[子流程片段库](./src/views/SubProcessLibraryView.vue)提供片段的独立管理、局部流程编辑和 CRUD；主流程中的嵌入式子流程节点将 `process` 快照随业务模型提交后端编译，管理入口在新标签页打开以保留主流程草稿。
 - 业务表单（/forms）：官方 form-js 草稿设计与预览、版本发布、历史与回滚、停启用和删除；审批/多人审批节点绑定固定版本 bizFormKey，任务办理按当前定义回填、校验并提交原字段 key。操作与实际验收见 [业务人工任务表单](docs/business-forms.md)。
@@ -92,10 +94,10 @@ SDK 0.2.0 新增 `@workflow/sdk/definition` 函数定义入口与 `@workflow/sdk
 | --- | --- |
 | 运行总览 | 引擎版本、实例/人工任务/异常 Job/Incident/定义/External Task 数量、最近 5 次部署；部分失败单独提示，不将查询失败显示为 0 |
 | 流程定义 | 名称或 key 模糊筛选、definitionId 精确查询、版本/部署 ID、只读 BPMN 图、原始 XML 查看与下载、挂起/恢复（不包含已有实例） |
-| 运行实例 | 按业务键和流程 key 查询、变量和活动树、已部署流程图和当前活动/异步等待节点高亮、挂起/恢复、确认后终止 |
+| 运行实例 | 按业务键和流程 key 查询、变量和活动树、精确版本业务图和当前活动标记、同定义 XML 备用图、挂起/恢复、确认后终止 |
 | 任务查询 | 人工任务按办理人/实例筛选；External Task 按 Topic/实例筛选，查看 Worker、锁到期时间和 retries |
 | Job / Incident | 独立分页、Incident 时间、Job 异常堆栈和重试次数调整 |
-| 历史查询 | 历史实例、任务、活动、变量（包含未结束记录）、按实例筛选、导出当前页 JSON |
+| 历史查询 | 历史实例详情与准确版本流程图、接口明确提供的完成/取消状态；历史任务、活动、变量查询、按实例筛选、导出当前页 JSON |
 | 操作日志 | Camunda 用户操作历史，展示对象/操作 ID、变更属性与新值；受引擎历史及认证配置影响 |
 
 “部署 BPMN”支持选择 `.bpmn` / `.xml` 文件或粘贴 XML，保留现有部署前 `historyTimeToLive` 缺省补齐为 30 天的逻辑，并展示返回的部署 ID 和定义版本。原始设计稿不自动保存。

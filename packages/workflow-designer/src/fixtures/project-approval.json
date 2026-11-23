@@ -5,10 +5,10 @@
     { "id": "start", "type": "start", "name": "发起", "x": 12, "y": 13 },
     { "id": "apply", "type": "approval", "name": "立项审批单", "x": 12, "y": 119 },
     { "id": "minister", "type": "approval", "name": "部长审批", "x": 12, "y": 225 },
-    { "id": "gwMinister", "type": "condition", "name": "部长审批结果", "x": 12, "y": 331 },
+    { "id": "gwMinister", "type": "condition", "name": "部长审批结果", "x": 252, "y": 331 },
     { "id": "managers", "type": "countersign", "name": "各部门经理会签", "approveMode": "ALL", "x": 12, "y": 437 },
-    { "id": "gwManagers", "type": "condition", "name": "会签结果", "x": 12, "y": 543 },
-    { "id": "end", "type": "end", "name": "结束", "x": 12, "y": 649 }
+    { "id": "gwManagers", "type": "condition", "name": "会签结果", "x": 252, "y": 543 },
+    { "id": "end", "type": "end", "name": "结束", "x": 432, "y": 649 }
   ],
   "flows": [
     { "source": "start", "target": "apply" },

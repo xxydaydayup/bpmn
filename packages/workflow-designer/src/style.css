@@ -1,4 +1,5 @@
 @import "@vue-flow/core/dist/style.css";
+@import "@vue-flow/minimap/dist/style.css";
 @import "tailwindcss/utilities.css" prefix(wfd);
 
 /* Only generated utilities are available to package components; no preflight/reset is included. */
@@ -143,13 +144,17 @@
 .wfd-canvas-caption strong { color: #5e7168; font-size: 11px; font-weight: 600; }
 .wfd-canvas-caption small { overflow: hidden; padding-left: 8px; border-left: 1px solid #dce3df; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .wfd-flow { width: 100%; height: 100%; background: transparent; }
-.wfd-flow .vue-flow__background { opacity: 0; }
+.wfd-flow .vue-flow__background { opacity: 1; pointer-events: none; }
 .wfd-flow .vue-flow__minimap { overflow: hidden; border: 1px solid var(--wfd-border); border-radius: 6px; box-shadow: var(--wfd-shadow); }
 .wfd-flow .vue-flow__controls { gap: 3px; padding: 3px; border: 1px solid var(--wfd-border); border-radius: 7px; box-shadow: var(--wfd-shadow); }
 .wfd-flow .vue-flow__controls-button { width: 30px; height: 30px; border: 0; border-radius: 4px; background: #fff; }
 .wfd-flow .vue-flow__controls-button:hover { background: #f2f7f4; }
-.wfd-flow .vue-flow__edge-path { stroke: var(--wfd-edge); }
+.wfd-flow .vue-flow__edge-path { stroke: var(--wfd-edge); stroke-width: 1.7; }
 .wfd-flow .vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--wfd-accent); stroke-width: 2.5; }
+@media (prefers-reduced-motion: no-preference) {
+  .wfd-flow .vue-flow__edge.selected .vue-flow__edge-path.wfd-edge-direction-animated { animation: wfd-edge-pulse 1.8s ease-in-out infinite; }
+}
+@keyframes wfd-edge-pulse { 0%, 100% { stroke-width: 2.5; } 50% { stroke-width: 4.5; } }
 .wfd-flow .vue-flow__handle { width: 9px; height: 9px; border: 2px solid white; background: #72988a; box-shadow: 0 0 0 1px #72988a; }
 .wfd-node { position: relative; display: flex; align-items: center; gap: 11px; width: 196px; min-height: 70px; padding: 11px 13px; border: 1px solid #d2dcd6; border-left: 3px solid #9daea6; border-radius: 7px; background: #fff; box-shadow: 0 3px 10px rgb(29 63 52 / 7%); transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .wfd-node:hover { border-color: #9ab7a9; box-shadow: 0 6px 16px rgb(29 63 52 / 10%); transform: translateY(-1px); }

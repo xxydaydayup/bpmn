@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { VueFlow, useVueFlow, type Connection, type NodeMouseEvent, type EdgeMouseEvent } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { MiniMap } from '@vue-flow/minimap'
 import { IconArrowBackUp, IconArrowForwardUp, IconChecklist, IconCloudUpload, IconCode, IconDownload, IconFileImport, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLayoutSidebarRightCollapse, IconLayoutSidebarRightExpand, IconPlus, IconTemplate, IconWand } from '@tabler/icons-vue'
 import { createDesignDocument, isWorkflowModel, parseWorkflowInput, workflowEditorNodeIssues } from './contract'
 import { templateIcons } from './icons'
@@ -23,10 +25,10 @@ const nodeTypes = workflowNodeCatalog
 const sample: WorkflowModel = {
   processId: 'project-approval', processName: '立项审批',
   nodes: [
-    { id: 'start', type: 'start', name: '发起', x: 320, y: 60 }, { id: 'apply', type: 'approval', name: '立项审批单', x: 320, y: 200 },
-    { id: 'minister', type: 'approval', name: '部长审批', x: 320, y: 340 }, { id: 'gwMinister', type: 'condition', name: '部长审批结果', x: 320, y: 480 },
-    { id: 'managers', type: 'countersign', name: '各部门经理会签', approveMode: 'ALL', x: 320, y: 620 },
-    { id: 'gwManagers', type: 'condition', name: '会签结果', x: 320, y: 760 }, { id: 'end', type: 'end', name: '结束', x: 320, y: 900 },
+    { id: 'start', type: 'start', name: '发起', x: 12, y: 13 }, { id: 'apply', type: 'approval', name: '立项审批单', x: 12, y: 119 },
+    { id: 'minister', type: 'approval', name: '部长审批', x: 12, y: 225 }, { id: 'gwMinister', type: 'condition', name: '部长审批结果', x: 252, y: 331 },
+    { id: 'managers', type: 'countersign', name: '各部门经理会签', approveMode: 'ALL', x: 12, y: 437 },
+    { id: 'gwManagers', type: 'condition', name: '会签结果', x: 252, y: 543 }, { id: 'end', type: 'end', name: '结束', x: 432, y: 649 },
   ],
   flows: [
     { source: 'start', target: 'apply' }, { source: 'apply', target: 'minister' }, { source: 'minister', target: 'gwMinister' },
@@ -82,10 +84,21 @@ const flowId = 'workflow-designer-' + useId()
 const flow = useVueFlow(flowId)
 const nodeTypesMap = computed(() => ({ workflowNode: markRaw(props.extensions?.nodeComponent ?? WorkflowNode) }))
 const edgeTypesMap = { workflowRoute: markRaw(WorkflowEdge) }
+const miniMapColors: Record<string, string> = {
+  start: '#a8cbbd', approval: '#b8c9e7', countersign: '#d1c1df', service: '#e3c99e',
+  receive: '#afd4dc', timer: '#c7bde0', condition: '#e7c8a4', parallel: '#b7c9df',
+  subProcess: '#bdcbd7', end: '#c5d0ca',
+}
+function minimapNodeColor(node: { data?: unknown }) {
+  const data = node.data && typeof node.data === 'object' ? node.data as { kind?: string } : undefined
+  return miniMapColors[data?.kind ?? ''] ?? '#cbd5d0'
+}
 const fitView = flow.fitView
 const zoomIn = flow.zoomIn
 const zoomOut = flow.zoomOut
 const setViewport = flow.setViewport
+const setCenter = flow.setCenter
+const getViewport = flow.getViewport
 const screenToFlowCoordinate = flow.screenToFlowCoordinate
 const selectedNode = computed(() => nodes.value.find((node: DesignerNode) => node.id === activeNodeId.value))
 const selectedEdge = computed(() => edges.value.find((edge: DesignerEdge) => edge.id === activeEdgeId.value))
@@ -454,14 +467,18 @@ function applyTemplate() {
   loadingInput.value = true
   const nextModel = cloneWorkflowModelWithFreshNodeIds(template.model)
   const current = currentDocument() as Record<string, unknown>
-  const editor = currentEditor()
-  delete editor.routes
+  const { routes: _routes, viewport: _viewport, ...editor } = currentEditor()
   applyDocument({ ...current, format: 'workflow-designer', version: 1, model: nextModel, editor } as WorkflowInput)
   templateOpen.value = false
-  nextTick(() => {
+  void nextTick(async () => {
     loadingInput.value = false
     updateDocument()
-    void fitView({ padding: 0.15, duration: 220 })
+    await waitForFlowRender()
+    await fitView({ padding: 0.15, duration: 220 })
+    const viewport = getViewport()
+    zoom.value = viewport.zoom
+    editorState.value = { ...editorState.value, viewport }
+    updateDocument(false)
   })
 }
 watch([nodes, edges], () => {
@@ -494,6 +511,9 @@ function waitForFlowRender() {
   })
 }
 function onViewportChange(event: { flowTransform: WorkflowViewport }) { zoom.value = event.flowTransform.zoom; editorState.value = { ...editorState.value, viewport: event.flowTransform }; updateDocument(false) }
+function onMinimapClick(event: { position: { x: number; y: number } }) {
+  void setCenter(event.position.x, event.position.y, { zoom: getViewport().zoom, duration: 220 })
+}
 function readBpmnXml(result: unknown) {
   if (typeof result === 'string') return result
   if (!result || typeof result !== 'object') return ''
@@ -683,7 +703,9 @@ defineExpose({ compile: compileModel, exportDesign: currentDocument, validate: (
           </div>
         </div>
         <div class="wfd-canvas-stage">
-          <VueFlow :id="flowId" v-model:nodes="nodes" v-model:edges="edges" class="wfd-flow" :node-types="nodeTypesMap" :edge-types="edgeTypesMap" :nodes-draggable="!readonlyMode" :nodes-connectable="!readonlyMode" :edges-updatable="!readonlyMode" :elements-selectable="true" :fit-view-on-init="!shouldAutoLayoutOnInit && !editorState.viewport" :min-zoom="0.2" :max-zoom="2.2" @init="handleFlowInit" @nodes-initialized="handleNodesInitialized" @connect="handleConnect" @edge-update="onEdgeUpdate" @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-start="onDragStart" @node-drag-stop="onDragStop" @move-end="onViewportChange">
+      <VueFlow :id="flowId" v-model:nodes="nodes" v-model:edges="edges" class="wfd-flow" :node-types="nodeTypesMap" :edge-types="edgeTypesMap" :nodes-draggable="!readonlyMode" :nodes-connectable="!readonlyMode" :edges-updatable="!readonlyMode" :elements-selectable="true" :fit-view-on-init="!shouldAutoLayoutOnInit && !editorState.viewport" :min-zoom="0.2" :max-zoom="2.2" @init="handleFlowInit" @nodes-initialized="handleNodesInitialized" @connect="handleConnect" @edge-update="onEdgeUpdate" @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-start="onDragStart" @node-drag-stop="onDragStop" @move-end="onViewportChange">
+        <Background variant="dots" :gap="20" :size="1.4" color="#dce5e0" />
+        <MiniMap position="top-right" :width="152" :height="104" :node-color="minimapNodeColor" node-stroke-color="#81978c" mask-color="rgb(245 248 246 / 72%)" mask-stroke-color="#789687" :pannable="true" aria-label="流程小地图" @click="onMinimapClick" />
           </VueFlow>
           <div class="wfd-canvas-caption" aria-hidden="true"><span class="wfd-canvas-caption-mark" /><strong>流程画布</strong><small>选择节点编辑属性，拖动连接点建立流转</small></div>
           <div v-if="!nodes.length" class="wfd-empty-canvas"><strong>从一个节点开始</strong><span>使用左侧节点库添加步骤，再拖动节点间的连接点。</span></div>

@@ -46,8 +46,8 @@ export const workflowTemplates: WorkflowTemplate[] = [
         { id: 'start', type: 'start', name: '开始', x: 320, y: 40 },
         { id: 'apply', type: 'approval', name: '提交申请', x: 320, y: 170 },
         { id: 'reviewers', type: 'countersign', name: '评审组会签', x: 320, y: 300, approveMode: 'ALL', sequential: false },
-        { id: 'result', type: 'condition', name: '会签结果', x: 320, y: 430 },
-        { id: 'end', type: 'end', name: '结束', x: 320, y: 560 },
+        { id: 'result', type: 'condition', name: '会签结果', x: 560, y: 430 },
+        { id: 'end', type: 'end', name: '结束', x: 740, y: 560 },
       ]),
       flows: flows([
         { source: 'start', target: 'apply' }, { source: 'apply', target: 'reviewers' },
@@ -66,8 +66,8 @@ export const workflowTemplates: WorkflowTemplate[] = [
         { id: 'start', type: 'start', name: '开始', x: 320, y: 40 },
         { id: 'apply', type: 'approval', name: '提交提案', x: 320, y: 170 },
         { id: 'voters', type: 'countersign', name: '成员投票', x: 320, y: 300, approveMode: 'VOTE', passRate: '0.7', sequential: true },
-        { id: 'result', type: 'condition', name: '投票结果', x: 320, y: 430 },
-        { id: 'end', type: 'end', name: '结束', x: 320, y: 560 },
+        { id: 'result', type: 'condition', name: '投票结果', x: 560, y: 430 },
+        { id: 'end', type: 'end', name: '结束', x: 740, y: 560 },
       ]),
       flows: flows([
         { source: 'start', target: 'apply' }, { source: 'apply', target: 'voters' },

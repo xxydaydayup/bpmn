@@ -20,15 +20,17 @@ vi.mock('@vue-flow/core', async () => {
       name: 'VueFlowTestHost',
       props: { nodes: { type: Array, default: () => [] }, edges: { type: Array, default: () => [] }, fitViewOnInit: { type: Boolean, default: false } },
       emits: ['init', 'nodes-initialized', 'node-click', 'edge-click', 'connect', 'edge-update', 'move-end', 'node-drag-start', 'node-drag', 'node-drag-stop'],
-      setup(props, { emit }) {
+      setup(props, { emit, slots }) {
         return () => h('div', { class: 'wfd-flow-mock' }, [
           ...(props.nodes as Array<{ id: string; data: { name: string } }>).map(node => h('button', { class: 'vue-flow__node', type: 'button', onClick: () => emit('node-click', { node }) }, node.data.name)),
           ...(props.edges as Array<{ id: string; source: string; target: string }>).map(edge => h('button', { class: 'vue-flow__edge', type: 'button', onClick: () => emit('edge-click', { edge }) }, edge.source + ' → ' + edge.target)),
+          ...(slots.default?.() ?? []),
         ])
       },
     }),
     useVueFlow: () => ({
-      fitView: vi.fn().mockResolvedValue(true), zoomIn: vi.fn(), zoomOut: vi.fn(), setViewport: vi.fn().mockResolvedValue(true),
+      fitView: vi.fn().mockResolvedValue(true), zoomIn: vi.fn(), zoomOut: vi.fn(), setViewport: vi.fn().mockResolvedValue(true), setCenter: vi.fn().mockResolvedValue(true),
+      getViewport: vi.fn(() => ({ x: 10, y: 20, zoom: 0.8 })),
       screenToFlowCoordinate: ({ x, y }: { x: number; y: number }) => ({ x, y }),
       getNodes: { value: [] as unknown[] },
     }),
@@ -39,6 +41,16 @@ vi.mock('@vue-flow/core', async () => {
     EdgeLabelRenderer: defineComponent({ name: 'EdgeLabelStub', template: '<span><slot /></span>' }),
     getSmoothStepPath: () => ['M 0 0 L 10 10', 5, 5, 0, 0],
   }
+})
+
+vi.mock('@vue-flow/background', async () => {
+  const { defineComponent } = await import('vue')
+  return { Background: defineComponent({ name: 'BackgroundTestStub', template: '<div class="vue-flow__background-test" />' }) }
+})
+
+vi.mock('@vue-flow/minimap', async () => {
+  const { defineComponent } = await import('vue')
+  return { MiniMap: defineComponent({ name: 'MiniMapTestStub', emits: ['click'], template: '<div class="vue-flow__minimap-test" />' }) }
 })
 
 const validModel = parseWorkflowInput(fixture as WorkflowModel).model
@@ -85,6 +97,15 @@ function expectUniqueDefinitions(process: WorkflowModel | WorkflowSubProcessMode
 }
 
 describe('public WorkflowDesigner behavior', () => {
+  it('keeps the default workflow example and shipped fixture on the same branch layout', () => {
+    const wrapper = mount(WorkflowDesigner)
+    const sample = (wrapper.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model
+    expect(sample.nodes.map(({ id, x, y }) => ({ id, x, y }))).toEqual(validModel.nodes.map(({ id, x, y }) => ({ id, x, y })))
+    expect(sample.flows.map(({ source, target, branch, conditionExpression }) => ({ source, target, branch, conditionExpression })))
+      .toEqual(validModel.flows.map(({ source, target, branch, conditionExpression }) => ({ source, target, branch, conditionExpression })))
+    wrapper.unmount()
+  })
+
   it('keeps conditions and history when reconnecting a real edge update and blocks readonly or duplicate updates', async () => {
     const input = structuredClone(parallelModel)
     input.flows[1]!.conditionExpression = 'amount > 1'
@@ -740,7 +761,8 @@ describe('public WorkflowDesigner behavior', () => {
   })
 
   it('applies the JSON template from the picker and fits its top-to-bottom graph', async () => {
-    const wrapper = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    const input = { format: 'workflow-designer', version: 1, model: validModel, editor: { viewport: { x: 72, y: -36, zoom: 1.25 }, theme: { accent: '#123456' } } }
+    const wrapper = mount(WorkflowDesigner, { props: { modelValue: input } })
     await wrapper.findAll('button').find(button => button.text() === '流程模板')!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === '使用模板')!.trigger('click')
     await wrapper.vm.$nextTick()
@@ -750,6 +772,11 @@ describe('public WorkflowDesigner behavior', () => {
     const nodeIds = new Set(model.nodes.map(node => node.id))
     expect(model.flows.every(flow => nodeIds.has(flow.source) && nodeIds.has(flow.target))).toBe(true)
     expect(wrapper.find('[role=dialog][aria-labelledby=wfd-template-title]').exists()).toBe(false)
+    const fitView = (wrapper.vm as unknown as { flow: { fitView: ReturnType<typeof vi.fn> } }).flow.fitView
+    const setViewport = (wrapper.vm as unknown as { flow: { setViewport: ReturnType<typeof vi.fn> } }).flow.setViewport
+    expect(setViewport).not.toHaveBeenCalledWith(input.editor.viewport)
+    await vi.waitFor(() => expect(fitView).toHaveBeenCalledWith({ padding: 0.15, duration: 220 }))
+    expect((wrapper.vm as unknown as { exportDesign: () => { editor: Record<string, unknown> } }).exportDesign().editor.theme).toEqual(input.editor.theme)
   })
 
   it('remaps node ids in template copies, including flows and node-to-node reminder targets', () => {
@@ -808,6 +835,42 @@ describe('public WorkflowDesigner behavior', () => {
     await wrapper.setProps({ sourceX: 65, sourceY: 85, targetX: 75, targetY: 160 })
     expect(wrapper.find('path').attributes('d')).toBe('M 65 85 L 65 160 L 75 160')
     expect(wrapper.find('.wfd-edge-label').attributes('style')).toContain('translate(65px,160px)')
+    expect(wrapper.find('path').classes()).not.toContain('wfd-edge-direction-animated')
+    await wrapper.setProps({ selected: true })
+    expect(wrapper.find('path').classes()).toContain('wfd-edge-direction-animated')
+    await wrapper.setProps({ selected: false })
+    expect(wrapper.find('path').classes()).not.toContain('wfd-edge-direction-animated')
+  })
+
+  it('shows the background grid and minimap in editable and readonly workflows without changing model data', async () => {
+    const editable = mount(WorkflowDesigner, { props: { modelValue: validModel } })
+    expect(editable.find('.vue-flow__background-test').exists()).toBe(true)
+    expect(editable.find('.vue-flow__minimap-test').exists()).toBe(true)
+    expect((editable.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model).toEqual(validModel)
+    const center = (editable.vm as unknown as { flow: { setCenter: ReturnType<typeof vi.fn> } }).flow.setCenter
+    await editable.findComponent({ name: 'MiniMapTestStub' }).vm.$emit('click', { position: { x: 420, y: 180 } })
+    expect(center).toHaveBeenCalledWith(420, 180, { zoom: 0.8, duration: 220 })
+    expect((editable.vm as unknown as { exportDesign: () => { model: WorkflowModel } }).exportDesign().model).toEqual(validModel)
+
+    const readonly = mount(WorkflowDesigner, { props: { modelValue: validModel, readonly: true } })
+    expect(readonly.find('.vue-flow__background-test').exists()).toBe(true)
+    expect(readonly.find('.vue-flow__minimap-test').exists()).toBe(true)
+    expect(readonly.get('.wfd-library-item').attributes('disabled')).toBeDefined()
+    editable.unmount(); readonly.unmount()
+  })
+
+  it('spaces rejection branches in built-in examples while preserving flow semantics', () => {
+    for (const templateId of ['countersign', 'vote-approval']) {
+      const template = workflowTemplates.find(item => item.id === templateId)!
+      const before = structuredClone(template.model)
+      const result = template.model.nodes.find(node => node.type === 'condition')!
+      const end = template.model.nodes.find(node => node.type === 'end')!
+      expect(result.x).toBeGreaterThan(template.model.nodes.find(node => node.type === 'approval')!.x)
+      expect(end.x).toBeGreaterThan(result.x)
+      expect(template.model.flows).toContainEqual(expect.objectContaining({ source: result.id, target: template.model.nodes.find(node => node.type === 'approval')!.id, branch: 'reject' }))
+      expect(template.model.flows.map(({ id: _id, ...flow }) => flow)).toEqual(before.flows.map(({ id: _id, ...flow }) => flow))
+      expect(template.model.nodes.map(({ x: _x, y: _y, ...node }) => node)).toEqual(before.nodes.map(({ x: _x, y: _y, ...node }) => node))
+    }
   })
 
   it('lays out the imported approval fixture with ELK without throwing', async () => {
@@ -1265,9 +1328,9 @@ describe('public WorkflowDesigner behavior', () => {
     const flow = wrapper.findComponent({ name: 'VueFlowTestHost' })
     expect(flow.props('fitViewOnInit')).toBe(false)
     const vm = wrapper.vm as unknown as { nodes: Array<{ id: string; position: { x: number; y: number } }> }
-    const initialPosition = vm.nodes[0].position
+    const initialPositions = vm.nodes.map(node => ({ ...node.position }))
     await flow.vm.$emit('init')
-    expect(vm.nodes[0].position).toEqual(initialPosition)
+    expect(vm.nodes.map(node => node.position)).toEqual(initialPositions)
     const measured = vm.nodes.map(node => ({
       ...node,
       dimensions: { width: 190, height: 76 },
@@ -1276,7 +1339,7 @@ describe('public WorkflowDesigner behavior', () => {
     const flowState = (wrapper.vm as unknown as { flow: { getNodes: { value: unknown[] } } }).flow
     flowState.getNodes.value = measured
     await flow.vm.$emit('nodes-initialized')
-    await vi.waitFor(() => expect(vm.nodes.some((node, index) => node.position.x !== initialPosition.x && index === 0)).toBe(true))
+    await vi.waitFor(() => expect(vm.nodes.map(node => node.position)).not.toEqual(initialPositions))
     const fitView = (wrapper.vm as unknown as { flow: { fitView: ReturnType<typeof vi.fn> } }).flow.fitView
     await vi.waitFor(() => expect(fitView).toHaveBeenCalledWith({ padding: 0.12, duration: 260 }))
     expect((wrapper.find('button[aria-label="撤销"]').element as HTMLButtonElement).disabled).toBe(true)

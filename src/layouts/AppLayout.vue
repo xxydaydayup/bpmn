@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElButton, ElIcon, ElMenu, ElMenuItem } from 'element-plus'
-import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting, Tickets, Files } from '@element-plus/icons-vue'
+import { Fold, Expand, Grid, Connection, VideoPlay, CircleCheck, Setting, Tickets, Files, View } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -60,6 +60,10 @@ const collapsed = computed(() => isWorkflowEditor.value || app.sidebarCollapsed)
         <ElMenuItem v-if="workflowRuntime.businessEnabled" index="/workflow-business" aria-label="业务流程">
           <ElIcon><Tickets /></ElIcon>
           <template #title><span>业务流程</span></template>
+        </ElMenuItem>
+        <ElMenuItem v-if="workflowRuntime.businessEnabled" index="/workflow-template-preview-demo" aria-label="流程模板预览接入示例">
+          <ElIcon><View /></ElIcon>
+          <template #title><span>模板预览接入示例</span></template>
         </ElMenuItem>
         <!-- <ElMenuItem index="/workflow-prototype" aria-label="流程控制面原型">
           <ElIcon><Monitor /></ElIcon>

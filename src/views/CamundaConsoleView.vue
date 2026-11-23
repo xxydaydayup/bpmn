@@ -45,8 +45,8 @@ import initialDiagram from "@/bpmn/requirement-process.bpmn?raw";
 import { camundaGateway } from "@/api/camunda/gateway";
 import { resolveWorkflowRuntime } from "@/config/workflowRuntime";
 import { createLatestQueryScope } from "@/utils/latestQuery";
-import { collectActiveActivityIds } from "@/utils/activityMarkers";
 import ReadOnlyProcessDiagram from "@/components/camunda/ReadOnlyProcessDiagram.vue";
+import WorkflowInstancePreview from "@/components/workflow/WorkflowInstancePreview.vue";
 import DataTable, { type DataTableColumn } from "@/components/common/DataTable";
 import type {
   CamundaActivityInstance,
@@ -189,11 +189,9 @@ const applied = reactive({
 const selectedDefinition = ref<CamundaProcessDefinition>();
 const selectedDefinitionXml = ref("");
 const selectedInstance = ref<CamundaProcessInstance>();
+const selectedHistoricInstance = ref<CamundaHistoricProcessInstance>();
 const selectedActivity = ref<CamundaActivityInstance>();
 const selectedInstanceXml = ref("");
-const activeActivityIds = computed(() =>
-  collectActiveActivityIds(selectedActivity.value),
-);
 const selectedVariables = ref<CamundaVariables>();
 const selectedJob = ref<CamundaJob>();
 const selectedJobStacktrace = ref("");
@@ -491,6 +489,7 @@ async function loadOperations() {
   ]);
 }
 function loadHistory() {
+  selectedHistoricInstance.value = undefined;
   const key = "history-" + historyTab.value;
   if (historyTab.value === "instances")
     return loadPage(
@@ -592,6 +591,9 @@ async function selectInstance(row: unknown) {
         : [],
     )
     .join("；");
+}
+function selectHistoricInstance(row: unknown) {
+  selectedHistoricInstance.value = rowWithId<CamundaHistoricProcessInstance>(row);
 }
 async function showJob(row: unknown) {
   const selected = rowWithId<CamundaJob>(row);
@@ -905,7 +907,12 @@ watch(taskTab, () => {
   if (activeTab.value === "tasks") void loadTasks();
 });
 watch(historyTab, () => {
+  selectedHistoricInstance.value = undefined;
   if (activeTab.value === "history") void loadHistory();
+});
+watch(activeTab, () => {
+  clearInstance();
+  selectedHistoricInstance.value = undefined;
 });
 async function applyDefinitionRoute() {
   if (disposed) return;
@@ -1351,11 +1358,11 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-      <ReadOnlyProcessDiagram
+      <WorkflowInstancePreview
         v-if="selectedInstance"
         :key="selectedInstance.id"
-        :xml="selectedInstanceXml"
-        :active-ids="activeActivityIds"
+        :instance-id="selectedInstance.id"
+        mode="running"
       />
     </div>
 
@@ -1668,6 +1675,8 @@ onBeforeUnmount(() => {
           v-loading="loading.history"
           :data="historicInstances"
           empty-text="暂无历史实例"
+          row-key="id"
+          @row-click="selectHistoricInstance"
           ><ElTableColumn
             prop="businessKey"
             label="业务键"
@@ -1691,7 +1700,7 @@ onBeforeUnmount(() => {
             ><template #default="{ row }">{{
               formatDate(row.endTime)
             }}</template></ElTableColumn
-          ></ElTable
+          ><ElTableColumn label="详情" width="105" fixed="right"><template #default="{ row }"><ElButton text size="small" @click.stop="selectHistoricInstance(row)">查看详情</ElButton></template></ElTableColumn></ElTable
         ><ElTable
           v-else-if="historyTab === 'tasks'"
           v-loading="loading.history"
@@ -1770,6 +1779,16 @@ onBeforeUnmount(() => {
           ></ElTable
         >
       </div>
+      <ElDialog
+        :model-value="Boolean(selectedHistoricInstance)"
+        title="流程实例只读详情"
+        width="min(1080px, calc(100vw - 32px))"
+        destroy-on-close
+        @close="selectedHistoricInstance = undefined"
+      >
+        <WorkflowInstancePreview v-if="selectedHistoricInstance" :key="selectedHistoricInstance.id" :instance-id="selectedHistoricInstance.id" mode="historic" />
+        <template #footer><ElButton @click="selectedHistoricInstance = undefined">关闭</ElButton></template>
+      </ElDialog>
     </div>
 
     <div v-else class="console-view">

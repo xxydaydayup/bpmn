@@ -338,7 +338,12 @@ export function useBusinessWorkflow(gateway: BusinessWorkflowGateway = businessW
       if (selectedTemplateKey.value === taskKey) applyTemplateDefaults()
     } catch (cause) {
       if (!disposed && controller === detailController && !(cause instanceof DOMException && cause.name === 'AbortError')) {
-        templateDetailError.value = errorMessage(cause, '任务模板详情加载失败')
+        const status = isAxiosError(cause) ? cause.response?.status
+          : cause && typeof cause === 'object' && 'httpStatus' in cause ? cause.httpStatus : undefined
+        templateDetailError.value = status === 401 ? '尚未认证或登录已过期，请登录业务系统后重试。'
+          : status === 403 ? '当前账号无权查看此任务模板。'
+            : status === 404 ? '任务模板不存在或已被删除。'
+              : errorMessage(cause, '任务模板详情加载失败')
       }
     } finally {
       if (!disposed && controller === detailController) templateDetailLoading.value = false

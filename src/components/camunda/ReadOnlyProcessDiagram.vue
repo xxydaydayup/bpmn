@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElAlert, ElButton } from 'element-plus'
 import NavigatedViewer from 'bpmn-js/lib/NavigatedViewer'
 import type Canvas from 'diagram-js/lib/core/Canvas'
@@ -7,17 +7,19 @@ import type ElementRegistry from 'diagram-js/lib/core/ElementRegistry'
 import camundaDescriptor from 'camunda-bpmn-moddle/resources/camunda.json'
 import 'bpmn-js/dist/assets/diagram-js.css'
 
-const props = withDefaults(defineProps<{ xml: string; activeIds?: string[] }>(), { activeIds: () => [] })
+const props = withDefaults(defineProps<{ xml: string; activeIds?: string[]; nodeStates?: Record<string, 'active' | 'completed' | 'canceled'> }>(), { activeIds: () => [] })
 const host = ref<HTMLDivElement>()
 const busy = ref(false)
 const error = ref('')
 const warning = ref('')
+const stateWarning = ref('')
+const hasStates = computed(() => props.activeIds.length > 0 || Object.keys(props.nodeStates ?? {}).length > 0)
 let viewer: NavigatedViewer | undefined
 let observer: ResizeObserver | undefined
 let sequence = 0
 let disposed = false
 let queue = Promise.resolve()
-let marked: string[] = []
+let marked: Array<{ id: string; marker: string }> = []
 let fitted = false
 let fitHandle = 0
 
@@ -33,6 +35,8 @@ function fit() {
     fitHandle = requestAnimationFrame(() => { fitHandle = 0; fit() })
     return
   }
+  // 导入时可能缓存了隐藏容器的零宽 viewbox；仅检查 DOM 尺寸不会刷新该缓存。
+  canvas.resized()
   canvas.zoom('fit-viewport')
   fitted = true
 }
@@ -40,9 +44,18 @@ function highlight() {
   if (!viewer || disposed) return
   const canvas = viewer.get<Canvas>('canvas')
   const registry = viewer.get<ElementRegistry>('elementRegistry')
-  marked.forEach(id => { if (registry.get(id)) canvas.removeMarker(id, 'runtime-active') })
-  marked = props.activeIds.filter(id => Boolean(registry.get(id)))
-  marked.forEach(id => canvas.addMarker(id, 'runtime-active'))
+  marked.forEach(({ id, marker }) => { if (registry.get(id)) canvas.removeMarker(id, marker) })
+  const states = { ...Object.fromEntries(props.activeIds.map(id => [id, 'active'])), ...props.nodeStates }
+  const missing: string[] = []
+  marked = []
+  for (const [id, state] of Object.entries(states)) {
+    const element = registry.get(id)
+    if (!element || element.type === 'bpmn:Process' || element.type === 'bpmn:SequenceFlow') { missing.push(id); continue }
+    const marker = 'runtime-' + state
+    canvas.addMarker(id, marker)
+    marked.push({ id, marker })
+  }
+  stateWarning.value = missing.length ? '部分活动状态无法匹配此流程图节点：' + missing.join('、') + '。未推断执行路径。' : ''
 }
 function render() {
   const request = ++sequence
@@ -50,11 +63,14 @@ function render() {
   busy.value = Boolean(xml)
   error.value = ''
   warning.value = ''
+  stateWarning.value = ''
   fitted = false
   // bpmn-js 导入不支持取消，串行执行并隔离旧结果，防止同一个画布并发替换。
   queue = queue.then(async () => {
     if (disposed || request !== sequence || !viewer) return
-    if (!xml) { viewer.clear(); return }
+    viewer.clear()
+    marked = []
+    if (!xml) { busy.value = false; return }
     try {
       const result = await viewer.importXML(xml)
       if (disposed || request !== sequence) return
@@ -69,8 +85,8 @@ function render() {
     }
   })
 }
-watch(() => props.xml, render)
-watch(() => props.activeIds, () => { if (!busy.value) highlight() }, { deep: true })
+watch(() => props.xml, render, { flush: 'sync' })
+watch(() => [props.activeIds, props.nodeStates], () => { if (!busy.value) highlight() }, { deep: true })
 onMounted(() => {
   if (!host.value) return
   viewer = new NavigatedViewer({ container: host.value, moddleExtensions: { camunda: camundaDescriptor } })
@@ -95,11 +111,12 @@ onBeforeUnmount(() => {
 <template>
   <section class="process-diagram" aria-label="只读流程图">
     <div class="diagram-toolbar">
-      <span>{{ activeIds.length ? '绿色描边：当前活动或异步等待节点' : '已部署流程图 · 只读' }}</span>
+      <span>{{ hasStates ? '实线蓝色：当前活动 · 虚线绿色：已完成 · 虚线红色：已取消' : '已部署流程图 · 只读' }}</span>
       <ElButton size="small" :disabled="busy || !xml || Boolean(error)" @click="fit">适应画布</ElButton>
     </div>
     <ElAlert v-if="error" type="error" :title="error" :closable="false" />
     <ElAlert v-if="warning" type="warning" :title="warning" :closable="false" />
+    <ElAlert v-if="stateWarning" type="warning" :title="stateWarning" :closable="false" />
     <div class="diagram-content" :aria-busy="busy">
       <div ref="host" class="diagram-canvas" :class="{ hidden: busy || !xml || error }" />
       <p v-if="busy || !xml" class="diagram-placeholder">{{ busy ? '加载流程图…' : '选择记录后加载流程图' }}</p>
@@ -114,6 +131,8 @@ onBeforeUnmount(() => {
 .diagram-canvas { height: 360px; }
 .diagram-canvas.hidden { visibility: hidden; }
 .diagram-placeholder { position: absolute; inset: 40% 0 auto; text-align: center; color: #72857c; }
-:deep(.runtime-active .djs-visual > :first-child) { stroke: #16845b !important; stroke-width: 4px !important; }
+:deep(.runtime-active .djs-visual > :first-child) { stroke: #2362ac !important; stroke-width: 4px !important; }
+:deep(.runtime-completed .djs-visual > :first-child) { stroke: #16845b !important; stroke-width: 3px !important; stroke-dasharray: 7 3 !important; }
+:deep(.runtime-canceled .djs-visual > :first-child) { stroke: #b34343 !important; stroke-width: 3px !important; stroke-dasharray: 3 3 !important; }
 @media (max-width: 760px) { .diagram-canvas { height: 280px; } }
 </style>

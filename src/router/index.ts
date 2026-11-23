@@ -8,6 +8,12 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/workflow-preview',
+      name: 'workflow-preview',
+      component: () => import('@/views/WorkflowEmbedView.vue'),
+      meta: { title: '流程预览' },
+    },
+    {
       path: '/',
       component: AppLayout,
       redirect: workflowRuntime.businessEnabled ? '/workflow-business' : '/table',
@@ -61,6 +67,12 @@ const router = createRouter({
           meta: { title: '业务流程' },
         },
         {
+          path: 'workflow-template-preview-demo',
+          name: 'workflow-template-preview-demo',
+          component: () => import('@/views/WorkflowTemplatePreviewView.vue'),
+          meta: { title: '模板预览接入示例' },
+        },
+        {
           path: 'workflow-prototype',
           name: 'workflow-prototype',
           component: () => import('@/views/WorkflowPrototypeView.vue'),
@@ -87,7 +99,7 @@ router.beforeEach((to) => {
   if (to.meta.developerOnly && !workflowRuntime.developerToolsEnabled) {
     return workflowRuntime.businessEnabled ? '/workflow-business' : '/table'
   }
-  if (to.name === 'workflow-business' && !workflowRuntime.businessEnabled) return '/table'
+  if ((to.name === 'workflow-business' || to.name === 'workflow-template-preview-demo') && !workflowRuntime.businessEnabled) return '/table'
 })
 
 router.afterEach((to) => {

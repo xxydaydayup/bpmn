@@ -11,7 +11,7 @@ import { resolveWorkflowRuntime } from '@/config/workflowRuntime'
 import { businessWorkflowGateway, verifyBusinessEngineConsistency } from '@/api/workflow'
 import type { BusinessUserTask, WorkflowConsistencyReport } from '@/api/workflow'
 import { camundaGateway } from '@/api/camunda/gateway'
-import ReadOnlyProcessDiagram from '@/components/camunda/ReadOnlyProcessDiagram.vue'
+import WorkflowSnapshotPreview from '@/components/workflow/WorkflowSnapshotPreview.vue'
 import type { TaskTemplate } from '@/api/workflow'
 import NodeVariableForm from '@/components/workflow/NodeVariableForm.vue'
 import TaskBusinessForm from '@/components/forms/TaskBusinessForm.vue'
@@ -194,6 +194,7 @@ function consistencyTag(status: 'passed' | 'failed' | 'observed') {
     <ElDialog :model-value="templateDetailVisible" title="当前任务模板详情" width="min(820px, calc(100vw - 32px))" @opened="detailOpened = true" @close="closeTemplateDetail">
       <div v-loading="workflow.templateDetailLoading.value" class="template-detail-body">
         <ElAlert v-if="workflow.templateDetailError.value" type="error" :closable="false" show-icon :title="workflow.templateDetailError.value" />
+        <ElButton v-if="workflow.templateDetailError.value" @click="workflow.loadTemplateDetail(workflow.templateDetailKey.value)">重新加载模板</ElButton>
         <template v-if="workflow.templateDetail.value">
           <ElDescriptions :column="2" border size="small" class="template-detail-meta">
             <ElDescriptionsItem label="模板名称">{{ workflow.templateDetail.value.taskName }}</ElDescriptionsItem><ElDescriptionsItem label="taskKey"><code>{{ workflow.templateDetail.value.taskKey }}</code></ElDescriptionsItem>
@@ -204,8 +205,11 @@ function consistencyTag(status: 'passed' | 'failed' | 'observed') {
             <ElDescriptionsItem label="描述" :span="2">{{ workflow.templateDetail.value.description || '—' }}</ElDescriptionsItem>
           </ElDescriptions>
           <div class="variable-requirements"><strong>全局变量</strong><span v-if="!workflow.templateDetail.value.globalVariables?.length">未定义</span><span v-for="item in workflow.templateDetail.value.globalVariables" :key="item.name"><code>{{ item.name }}</code> · {{ item.type }}{{ item.required ? ' · 必填' : '' }}<small v-if="item.description">{{ item.description }}</small></span></div>
-          <ReadOnlyProcessDiagram v-if="detailOpened && workflow.templateDetail.value.bpmnXml" :xml="workflow.templateDetail.value.bpmnXml" />
-          <ElAlert v-else-if="detailOpened" type="info" :closable="false" show-icon title="当前模板没有可展示的 BPMN 流程 XML" />
+          <WorkflowSnapshotPreview v-if="detailOpened"
+            :key="workflow.templateDetail.value.processDefinitionId || workflow.templateDetailKey.value"
+            :model="workflow.templateDetail.value.displayJson"
+            :bpmn-xml="workflow.templateDetail.value.bpmnXml"
+          />
         </template>
       </div>
       <template #footer><ElButton @click="closeTemplateDetail">关闭</ElButton><ElButton type="primary" :icon="Edit" :disabled="!workflow.templateDetail.value?.bpmnXml" @click="editTemplate">进入设计器修改</ElButton></template>

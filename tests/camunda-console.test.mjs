@@ -50,6 +50,7 @@ async function mountConsole(overrides = {}) {
   code = code.replace(/import\s*\{([^}]+)\}\s*from ['"]@element-plus\/icons-vue['"]/, (_, names) => names.split(',').map(n => n.trim()).filter(Boolean).map(n => 'const ' + n + ' = {};').join('\n'))
   code = code.replace(/import initialDiagram from [^\n]+/, 'const initialDiagram = "<xml/>";')
   code = code.replace(/import ReadOnlyProcessDiagram from [^\n]+/, 'const ReadOnlyProcessDiagram = {};')
+  code = code.replace(/import WorkflowInstancePreview from [^\n]+/, 'const WorkflowInstancePreview = {};')
   code = code.replace(/import DataTable, \{ type DataTableColumn \} from ['"]@\/components\/common\/DataTable['"]/, 'const DataTable = {};')
   code = code.replace(/import \{ useRoute \} from ['"]vue-router['"]/, 'const useRoute = () => ({ query: {} });')
   code = code.replace(/import \{ resolveWorkflowRuntime \} from ['"]@\/config\/workflowRuntime['"]/, 'const resolveWorkflowRuntime = () => ({ engineLabel: "测试引擎", tenantId: "", developerToolsEnabled: true, businessEnabled: false });')

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>业务系统 iframe 接入示例</title>
+  <style>
+    body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; color: #243c36; background: #f5f7f6; }
+    h1 { font-size: 22px; }
+    form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0; }
+    label { display: grid; gap: 6px; min-width: min(440px, 100%); }
+    select, button { min-height: 44px; padding: 0 12px; border: 1px solid #bdd5cf; border-radius: 4px; font: inherit; }
+    button { color: white; background: #24745e; cursor: pointer; }
+    button:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
+    .preview-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 128px; }
+    .preview-button svg { width: 18px; height: 18px; }
+    #status { min-height: 24px; color: #536d61; font-size: 14px; }
+    #status[data-kind="error"] { color: #a33d37; }
+    iframe { display: block; width: 100%; height: 650px; border: 1px solid #dce5df; border-radius: 6px; background: white; }
+    p { line-height: 1.6; }
+    .notice { padding: 14px 16px; margin: 18px 0; border: 1px solid #e5c98b; border-radius: 6px; color: #684f1d; background: #fff9e9; }
+    .notice[hidden], iframe[hidden] { display: none; }
+    @media (max-width: 600px) { body { padding: 12px; } label, input { width: 100%; box-sizing: border-box; } }
+  </style>
+</head>
+<body>
+  <h1>流程预览 iframe 接入示例</h1>
+  <p>这是业务系统中的宿主页示例，不是独立预览应用。开发时请通过本项目 Vite 服务访问此文件；部署后请把它放在已配置同源 API 代理的业务系统站点。</p>
+  <div id="file-warning" class="notice" role="alert" hidden>当前页面是从本地文件直接打开的，iframe 无法连接到预览应用。请先启动本项目开发服务，或按 <code>docs/workflow-preview-embedding.md</code> 将应用部署到 <code>/workflow/</code> 后再访问此示例。</div>
+  <form id="preview-form">
+    <label for="template-select">已发布的流程模板
+      <select id="template-select" required disabled><option value="">正在加载模板…</option></select>
+    </label>
+    <button id="preview-button" class="preview-button" type="submit" disabled aria-label="预览所选流程模板">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.7" stroke="currentColor" stroke-width="1.8"/></svg>
+      预览流程图
+    </button>
+  </form>
+  <p id="status" role="status" aria-live="polite">请选择一个已发布的流程模板。</p>
+  <iframe id="workflow-preview" title="流程只读预览" referrerpolicy="same-origin"></iframe>
+  <script>
+    const fileMode = window.location.protocol === 'file:';
+    const localDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname) && Boolean(window.location.port);
+    const apiPath = localDevelopment ? '/api/v1/template' : '/workflow/api/v1/template';
+    const iframePath = localDevelopment ? '/workflow-preview' : '/workflow/workflow-preview';
+    const select = document.getElementById('template-select');
+    const previewButton = document.getElementById('preview-button');
+    const status = document.getElementById('status');
+    const iframe = document.getElementById('workflow-preview');
+
+    function showStatus(message, kind = '') {
+      status.textContent = message;
+      status.dataset.kind = kind;
+    }
+    function templateKey(template) { return template.templateKey || template.taskKey || ''; }
+    function templateName(template) { return template.templateName || template.taskName || templateKey(template); }
+
+    async function loadTemplates() {
+      select.disabled = true;
+      previewButton.disabled = true;
+      showStatus('正在加载已发布的流程模板…');
+      try {
+        const response = await fetch(apiPath + '?firstResult=0&maxResults=100', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (response.status === 401) throw new Error('请先登录业务系统，再查看流程模板。');
+        if (response.status === 403) throw new Error('当前账号无权读取流程模板。');
+        if (!response.ok) throw new Error('模板加载失败（HTTP ' + response.status + '）。');
+        const body = await response.json();
+        if (body.code && body.code !== 'OK') throw new Error(body.message || '模板接口返回失败。');
+        const templates = body.data;
+        if (!Array.isArray(templates)) throw new Error('模板接口返回格式不正确。');
+        select.replaceChildren(new Option(templates.length ? '请选择流程模板' : '暂无已发布模板', ''));
+        for (const template of templates) {
+          const key = templateKey(template);
+          if (!key) continue;
+          const label = templateName(template) + ' · ' + key + ' · v' + (template.templateVersion || template.version || '—');
+          select.add(new Option(label, key));
+        }
+        select.disabled = select.options.length <= 1;
+        showStatus(select.disabled ? '当前没有可选择的已发布流程模板。' : '请选择一个已发布的流程模板。');
+      } catch (error) {
+        select.replaceChildren(new Option('模板加载失败', ''));
+        showStatus(error instanceof Error ? error.message : '模板加载失败，请稍后重试。', 'error');
+      }
+    }
+
+    if (fileMode) {
+      document.getElementById('file-warning').hidden = false;
+      iframe.hidden = true;
+      select.replaceChildren(new Option('请通过 Web 服务打开此示例', ''));
+      showStatus('file:// 页面不能访问业务系统的模板接口或 iframe 预览。', 'error');
+    } else {
+      void loadTemplates();
+    }
+
+    select.addEventListener('change', () => {
+      previewButton.disabled = !select.value;
+      iframe.removeAttribute('src');
+      showStatus(select.value ? '已选择模板，点击“预览流程图”查看。' : '请选择一个已发布的流程模板。');
+    });
+    document.getElementById('preview-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!select.value) return;
+      const target = new URL(iframePath, window.location.origin);
+      target.search = new URLSearchParams({ templateKey: select.value }).toString();
+      iframe.src = target.toString();
+      showStatus('正在打开所选模板的只读预览。');
+    });
+  </script>
+</body>
+</html>

@@ -1,6 +1,8 @@
 import WorkflowDesigner from './WorkflowDesigner.vue'
+import WorkflowPreview from './WorkflowPreview.vue'
 
-export { WorkflowDesigner }
+export { WorkflowDesigner, WorkflowPreview }
+export type { WorkflowPreviewMetadata, WorkflowPreviewNodeState, WorkflowPreviewReady } from './preview'
 export { createDesignDocument, isWorkflowModel, parseWorkflowInput, workflowIssues, WORKFLOW_NODE_TYPES } from './contract'
 export { createNodeRecord, fromCanvas, toCanvas } from './adapter'
 export { cloneWorkflowModelWithFreshNodeIds } from './definition-ids'

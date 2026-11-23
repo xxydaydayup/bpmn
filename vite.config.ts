@@ -5,8 +5,16 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const configuredBase = env.VITE_APP_BASE_PATH || "/";
+  if (!/^\/(?!\/)[^?#\\]*$/.test(configuredBase)) {
+    throw new Error("VITE_APP_BASE_PATH 必须为同源绝对子路径，例如 /workflow/");
+  }
+  const appBase = configuredBase.endsWith("/") ? configuredBase : configuredBase + "/";
+  const apiBase = env.VITE_API_BASE_URL?.startsWith("/") && !env.VITE_API_BASE_URL.startsWith("//")
+    ? env.VITE_API_BASE_URL.replace(/\/$/, "") : "/api";
 
   return {
+    base: appBase,
     plugins: [vue(), tailwindcss()],
     resolve: {
       alias: [
@@ -39,15 +47,16 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5171,
       proxy: {
-        "/api/camunda": {
+        [apiBase + "/camunda"]: {
           target: env.CAMUNDA_PROXY_TARGET,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/camunda/, "/engine-rest"),
+          rewrite: (path) => "/engine-rest" + path.slice((apiBase + "/camunda").length),
           ...(env.CAMUNDA_PROXY_AUTH ? { auth: env.CAMUNDA_PROXY_AUTH } : {}),
         },
-        "/api": {
+        [apiBase]: {
           target: env.API_PROXY_TARGET,
           changeOrigin: true,
+          rewrite: (path) => "/api" + path.slice(apiBase.length),
           ...(env.API_PROXY_AUTH ? { auth: env.API_PROXY_AUTH } : {}),
         },
       },
